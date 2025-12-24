@@ -69,16 +69,32 @@ class WalletWatchListener {
   }
 
   private loadWatchAddresses(): void {
+    // First try WATCH_ADDRESSES for backwards compatibility
     const watchAddressesStr = process.env.WATCH_ADDRESSES || '';
-    if (!watchAddressesStr) {
-      logger.error('⚠️  No WATCH_ADDRESSES found in .env file!');
-      process.exit(1);
+    if (watchAddressesStr) {
+      this.watchAddresses = watchAddressesStr
+        .split(',')
+        .map(addr => addr.trim())
+        .filter(addr => addr.length > 0);
     }
 
-    this.watchAddresses = watchAddressesStr
-      .split(',')
-      .map(addr => addr.trim())
-      .filter(addr => addr.length > 0);
+    // Then add all LEADER_WALLET_* variables
+    const leaderWallets: string[] = [];
+    for (let i = 1; i <= 20; i++) {
+      const wallet = process.env[`LEADER_WALLET_${i}`];
+      if (wallet && wallet.trim().length > 0) {
+        leaderWallets.push(wallet.trim());
+      }
+    }
+
+    // Combine and deduplicate
+    this.watchAddresses = [...new Set([...this.watchAddresses, ...leaderWallets])];
+
+    if (this.watchAddresses.length === 0) {
+      logger.error('⚠️  No wallets found to watch!');
+      logger.error('    Add WATCH_ADDRESSES or LEADER_WALLET_1, LEADER_WALLET_2, etc. to .env');
+      process.exit(1);
+    }
 
     logger.info(`Loaded ${this.watchAddresses.length} wallet(s) to watch:`);
     this.watchAddresses.forEach(addr => {
@@ -90,6 +106,9 @@ class WalletWatchListener {
     logger.info('╔══════════════════════════════════════════════════╗');
     logger.info('║   🔍 Wallet Watch Listener Starting...          ║');
     logger.info('╚══════════════════════════════════════════════════╝');
+    logger.info('');
+    logger.info('💡 To change wallets: Edit LEADER_WALLET_* in .env and restart');
+    logger.info('');
     
     try {
       // Test database connection

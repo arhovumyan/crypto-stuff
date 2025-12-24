@@ -23,16 +23,33 @@ async function testConfiguration() {
 
   let allGood = true;
 
-  // Test 1: WATCH_ADDRESSES
-  console.log('1️⃣  Checking WATCH_ADDRESSES...');
+  // Test 1: Watch Addresses (WATCH_ADDRESSES or LEADER_WALLET_*)
+  console.log('1️⃣  Checking watch addresses...');
   const watchAddresses = process.env.WATCH_ADDRESSES || '';
-  if (!watchAddresses) {
-    console.log('   ❌ WATCH_ADDRESSES not found in .env');
+  const wallets: string[] = [];
+  
+  if (watchAddresses) {
+    wallets.push(...watchAddresses.split(',').map(w => w.trim()).filter(w => w.length > 0));
+  }
+  
+  // Check LEADER_WALLET_* variables
+  for (let i = 1; i <= 20; i++) {
+    const wallet = process.env[`LEADER_WALLET_${i}`];
+    if (wallet && wallet.trim().length > 0) {
+      wallets.push(wallet.trim());
+    }
+  }
+  
+  // Deduplicate
+  const uniqueWallets = [...new Set(wallets)];
+  
+  if (uniqueWallets.length === 0) {
+    console.log('   ❌ No wallets found to watch');
+    console.log('      Add WATCH_ADDRESSES or LEADER_WALLET_1, LEADER_WALLET_2, etc.');
     allGood = false;
   } else {
-    const wallets = watchAddresses.split(',').map(w => w.trim()).filter(w => w.length > 0);
-    console.log(`   ✅ Found ${wallets.length} wallet(s) to watch:`);
-    wallets.forEach(w => console.log(`      - ${w}`));
+    console.log(`   ✅ Found ${uniqueWallets.length} wallet(s) to watch:`);
+    uniqueWallets.forEach(w => console.log(`      - ${w}`));
   }
 
   // Test 2: Trading Wallet

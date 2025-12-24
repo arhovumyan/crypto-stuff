@@ -50,12 +50,13 @@ export class ListenerService {
       const wallets = await this.recorder.getFollowedWallets();
       
       if (wallets.length === 0) {
-        logger.warn('⚠️  No followed wallets found in database!');
-        logger.info('Make sure to run the database migrations first.');
+        logger.warn('⚠️  No followed wallets found!');
+        logger.info('Add wallets to database OR set LEADER_WALLET_* in .env file');
         return;
       }
 
       logger.info(`Found ${wallets.length} followed wallets to monitor`);
+      logger.info('💡 To change wallets: Edit LEADER_WALLET_* in .env and restart');
 
       // Subscribe to each wallet
       for (const wallet of wallets) {

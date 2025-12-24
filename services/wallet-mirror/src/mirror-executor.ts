@@ -130,6 +130,9 @@ class MirrorExecutor {
     logger.info('╔══════════════════════════════════════════════════╗');
     logger.info('║   💰 Mirror Executor Starting...                ║');
     logger.info('╚══════════════════════════════════════════════════╝');
+    logger.info('');
+    logger.info('💡 Watching trades from LEADER_WALLET_* addresses');
+    logger.info('');
 
     try {
       // Test database connection
