@@ -1,0 +1,33 @@
+{
+  "name": "@copytrader/wallet-mirror",
+  "version": "1.0.0",
+  "description": "Direct wallet mirroring service with fixed 0.1 SOL trades",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "watch": "tsx watch src/wallet-watch-listener.ts",
+    "mirror": "tsx src/mirror-executor.ts",
+    "listener": "tsx src/wallet-watch-listener.ts",
+    "executor": "tsx src/mirror-executor.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.87.6",
+    "@solana/spl-token": "^0.3.9",
+    "pg": "^8.11.3",
+    "pino": "^8.16.2",
+    "pino-pretty": "^10.2.3",
+    "dotenv": "^16.3.1",
+    "bip39": "^3.1.0",
+    "ed25519-hd-key": "^1.3.0",
+    "axios": "^1.6.2",
+    "bs58": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.4",
+    "typescript": "^5.3.3",
+    "tsx": "^4.7.0"
+  }
+}

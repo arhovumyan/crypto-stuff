@@ -1,0 +1,70 @@
+/**
+ * Copy Executor Service Entry Point
+ */
+
+import { CopyExecutor } from './copy-executor.js';
+import pino from 'pino';
+import dotenv from 'dotenv';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Load .env from project root
+dotenv.config({ path: resolve(__dirname, '../../../.env') });
+
+const logger = pino({
+  transport: {
+    target: 'pino-pretty',
+    options: {
+      colorize: true,
+      translateTime: 'yyyy-mm-dd HH:MM:ss Z',
+      ignore: 'pid,hostname',
+      messageFormat: '{context} | {msg}',
+    },
+  },
+});
+
+const executor = new CopyExecutor();
+
+// Handle graceful shutdown
+process.on('SIGINT', () => {
+  logger.info({ context: 'Received SIGINT, shutting down gracefully' });
+  executor.stop();
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  logger.info({ context: 'Received SIGTERM, shutting down gracefully' });
+  executor.stop();
+  process.exit(0);
+});
+
+// Handle uncaught errors
+process.on('uncaughtException', (error) => {
+  logger.error({
+    context: 'Uncaught exception',
+    error: error.message,
+    stack: error.stack,
+  });
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error({
+    context: 'Unhandled rejection',
+    reason,
+    promise,
+  });
+});
+
+// Start the service
+executor.start().catch((error) => {
+  logger.error({
+    context: 'Failed to start CopyExecutor',
+    error: error.message,
+    stack: error.stack,
+  });
+  process.exit(1);
+});
