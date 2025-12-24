@@ -11,6 +11,7 @@
     "mirror": "tsx src/mirror-executor.ts",
     "listener": "tsx src/wallet-watch-listener.ts",
     "executor": "tsx src/mirror-executor.ts",
+    "test-config": "tsx src/test-config.ts",
     "build": "tsc"
   },
   "dependencies": {
