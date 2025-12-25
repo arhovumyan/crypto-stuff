@@ -23,7 +23,7 @@ export const logger = pino(
             target: 'pino-pretty',
             options: {
               colorize: true,
-              translateTime: 'YYYY-MM-DD HH:MM:ss Z',
+              translateTime: 'HH:MM:ss',
               ignore: 'pid,hostname,context',
               messageFormat: '{context} | {msg}',
               singleLine: false,

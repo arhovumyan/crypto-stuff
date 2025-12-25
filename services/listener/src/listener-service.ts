@@ -50,13 +50,13 @@ export class ListenerService {
       const wallets = await this.recorder.getFollowedWallets();
       
       if (wallets.length === 0) {
-        logger.warn('⚠️  No followed wallets found!');
+        logger.warn('No followed wallets found!');
         logger.info('Add wallets to database OR set LEADER_WALLET_* in .env file');
         return;
       }
 
       logger.info(`Found ${wallets.length} followed wallets to monitor`);
-      logger.info('💡 To change wallets: Edit LEADER_WALLET_* in .env and restart');
+      logger.info('To change wallets: Edit LEADER_WALLET_* in .env and restart');
 
       // Subscribe to each wallet
       for (const wallet of wallets) {
@@ -90,7 +90,7 @@ export class ListenerService {
           await this.handleLogNotification(message);
         }
       } catch (error) {
-        logger.error({ error, message }, 'Error handling message');
+        logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Error handling WebSocket message');
       }
     });
   }
@@ -136,18 +136,44 @@ export class ListenerService {
   }
 
   private logTradeDetection(trade: any): void {
+    // Handle both snake_case (from DB) and camelCase (from code)
+    const leaderWallet = trade.leader_wallet || trade.leaderWallet;
+    const signature = trade.signature;
+    const tokenInMint = trade.token_in_mint || trade.tokenInMint;
+    const tokenInSymbol = trade.token_in_symbol || trade.tokenInSymbol;
+    const tokenOutMint = trade.token_out_mint || trade.tokenOutMint;
+    const tokenOutSymbol = trade.token_out_symbol || trade.tokenOutSymbol;
+    const amountIn = trade.amount_in || trade.amountIn;
+    const amountOut = trade.amount_out || trade.amountOut;
+    
+    const tokenInDisplay = this.getTokenSymbol(tokenInMint, tokenInSymbol);
+    const tokenOutDisplay = this.getTokenSymbol(tokenOutMint, tokenOutSymbol);
+    const action = tokenOutDisplay === 'SOL' ? '🔴 SELL' : '🟢 BUY';
+    
     logger.info('');
+    logger.info('─────────────────────────────────────────────────────────────────────────────────');
     logger.info('═══════════════════════════════════════════════════');
-    logger.info('🎯 TRADE DETECTED');
+    logger.info(`${action} DETECTED`);
     logger.info('═══════════════════════════════════════════════════');
-    logger.info(`Leader:     ${trade.leaderWallet.slice(0, 8)}...${trade.leaderWallet.slice(-4)}`);
-    logger.info(`Signature:  ${trade.signature.slice(0, 16)}...`);
-    logger.info(`Token In:   ${trade.tokenInSymbol || 'Unknown'} (${trade.amountIn})`);
-    logger.info(`Token Out:  ${trade.tokenOutSymbol || 'Unknown'} (${trade.amountOut})`);
-    logger.info(`DEX:        ${trade.dexProgram?.slice(0, 8) || 'Unknown'}...`);
-    logger.info(`Time:       ${new Date(trade.blockTime).toISOString()}`);
+    logger.info(`Wallet:     ${leaderWallet}`);
+    logger.info(`Token:      ${tokenInDisplay} → ${tokenOutDisplay}`);
+    logger.info(`Amount:     ${Number(amountIn).toFixed(4)} ${tokenInDisplay} → ${Number(amountOut).toFixed(6)} ${tokenOutDisplay}`);
+    logger.info(`Signature:  ${signature}`);
     logger.info('═══════════════════════════════════════════════════');
+    logger.info('─────────────────────────────────────────────────────────────────────────────────');
     logger.info('');
+  }
+
+  private getTokenSymbol(mint: string, symbol: string | null | undefined): string {
+    // SOL native mint
+    if (mint === 'So11111111111111111111111111111111111111112') {
+      return 'SOL';
+    }
+    // Use symbol if available, otherwise show truncated mint
+    if (symbol && symbol !== 'Unknown') {
+      return symbol;
+    }
+    return mint.slice(0, 4) + '...' + mint.slice(-4);
   }
 
   private async displayStats(): Promise<void> {

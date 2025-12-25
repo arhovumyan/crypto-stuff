@@ -205,8 +205,12 @@ export class TransactionParser {
       rawTransaction: tx,
     };
 
+    const tokenInDisplay = tokenIn.symbol || (tokenIn.mint === 'So11111111111111111111111111111111111111112' ? 'SOL' : tokenIn.mint.slice(0, 6) + '...');
+    const tokenOutDisplay = tokenOut.symbol || (tokenOut.mint === 'So11111111111111111111111111111111111111112' ? 'SOL' : tokenOut.mint.slice(0, 6) + '...');
+    const action = tokenOutDisplay === 'SOL' ? 'SOLD' : 'BOUGHT';
+    
     logger.info(
-      `SWAP DETECTED | Signature: ${signature} | Wallet: ${walletAddress} | Sold: ${tokenIn.amount} ${tokenIn.symbol || tokenIn.mint} | Bought: ${tokenOut.amount} ${tokenOut.symbol || tokenOut.mint} | DEX: ${dexProgram || 'Unknown'}`
+      `${action} | ${tokenInDisplay} → ${tokenOutDisplay} | Amount: ${tokenIn.amount.toFixed(4)} → ${tokenOut.amount.toFixed(6)} | Wallet: ...${walletAddress.slice(-8)}`
     );
 
     return detectedSwap;

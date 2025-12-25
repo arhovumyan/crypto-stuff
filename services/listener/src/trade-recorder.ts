@@ -47,13 +47,12 @@ export class TradeRecorder {
       }
 
       const trade = result.rows[0];
-      const timestamp = new Date(swap.blockTime * 1000).toISOString();
+      const tokenInDisplay = swap.tokenIn.symbol || (swap.tokenIn.mint === 'So11111111111111111111111111111111111111112' ? 'SOL' : swap.tokenIn.mint.slice(0, 6) + '...');
+      const tokenOutDisplay = swap.tokenOut.symbol || (swap.tokenOut.mint === 'So11111111111111111111111111111111111111112' ? 'SOL' : swap.tokenOut.mint.slice(0, 6) + '...');
       
       logger.info(
-        `TRADE SAVED | ID: ${trade.id} | Time: ${timestamp} | Wallet: ${swap.leaderWallet} | ` +
-        `Token In: ${swap.tokenIn.symbol || 'Unknown'} (${swap.tokenIn.mint}) | Amount In: ${swap.tokenIn.amount} | ` +
-        `Token Out: ${swap.tokenOut.symbol || 'Unknown'} (${swap.tokenOut.mint}) | Amount Out: ${swap.tokenOut.amount} | ` +
-        `DEX: ${swap.dexProgram || 'Unknown'} | Signature: ${swap.signature}`
+        `✅ Trade saved (ID: ${trade.id}) | ${tokenInDisplay} → ${tokenOutDisplay} | ` +
+        `Amount: ${swap.tokenIn.amount.toFixed(4)} → ${swap.tokenOut.amount.toFixed(6)}`
       );
 
       // Update last trade time for the wallet

@@ -23,17 +23,27 @@ dotenv.config({ path: resolve(__dirname, '../../../.env') });
 const { Pool } = pg;
 
 // Initialize logger
-const logger = pino({
-  transport: {
+const logger = pino(
+  {
+    level: process.env.LOG_LEVEL || 'info',
+  },
+  pino.transport({
     target: 'pino-pretty',
     options: {
       colorize: true,
-      translateTime: 'yyyy-mm-dd HH:MM:ss Z',
-      ignore: 'pid,hostname',
+      translateTime: 'HH:MM:ss',
+      ignore: 'pid,hostname,context',
       messageFormat: '{context} | {msg}',
+      singleLine: false,
     },
-  },
-});
+  })
+);
+
+function createLogger(context: string) {
+  return logger.child({ context });
+}
+
+const log = createLogger('copy-executor');
 
 // Initialize database
 const db = new Pool({
@@ -91,15 +101,9 @@ export class CopyExecutor {
       blacklistStr.split(',').map(t => t.trim()).filter(t => t.length > 0)
     );
 
-    logger.info({
-      context: 'CopyExecutor initialized',
-      mode: this.fixedBuyAmountSOL ? 'Fixed Amount' : 'Percentage',
-      fixedBuyAmountSOL: this.fixedBuyAmountSOL,
-      copyPercentage: this.copyPercentage,
-      maxPositionSizeSOL: this.maxPositionSizeSOL,
-      enableLiveTrading: this.enableLiveTrading,
-      blacklistedTokens: this.blacklistedTokens.size,
-    });
+    const mode = this.fixedBuyAmountSOL ? `Fixed ${this.fixedBuyAmountSOL} SOL` : `${this.copyPercentage}%`;
+    const tradingMode = this.enableLiveTrading ? '🔴 LIVE' : '📝 PAPER';
+    log.info(`⚙️  Executor initialized | Mode: ${mode} | Trading: ${tradingMode} | Blacklist: ${this.blacklistedTokens.size} tokens`);
   }
 
   /**
@@ -125,10 +129,8 @@ export class CopyExecutor {
     const derivedSeed = derivePath("m/44'/501'/0'/0'", seed.toString('hex')).key;
     this.keypair = Keypair.fromSeed(derivedSeed);
 
-    logger.info({
-      context: 'Wallet initialized',
-      publicKey: this.keypair.publicKey.toBase58(),
-    });
+    const addr = this.keypair.publicKey.toBase58();
+    log.info(`💼 Wallet initialized | Address: ${addr.slice(0, 8)}...${addr.slice(-4)}`);
   }
 
   /**
@@ -411,7 +413,7 @@ export class CopyExecutor {
    * Start the copy executor
    */
   async start(): Promise<void> {
-    logger.info({ context: 'Starting CopyExecutor service' });
+    log.info('🚀 Starting Copy Executor service...');
 
     // Initialize wallet
     await this.initializeWallet();
@@ -425,14 +427,12 @@ export class CopyExecutor {
     const balance = await this.connection.getBalance(this.keypair.publicKey);
     const balanceSOL = balance / LAMPORTS_PER_SOL;
 
-    logger.info({
-      context: 'Wallet ready',
-      address: publicKey,
-      balance: balanceSOL.toFixed(4) + ' SOL',
-    });
+    log.info(`💰 Wallet ready | Balance: ${balanceSOL.toFixed(4)} SOL`);
 
     if (!this.enableLiveTrading) {
-      logger.info({ context: 'PAPER TRADING MODE | Transactions will be simulated only' });
+      log.info('📝 PAPER TRADING MODE | Transactions will be simulated only');
+    } else {
+      log.info('🔴 LIVE TRADING MODE | Real transactions will be executed');
     }
 
     // Get last processed trade ID
@@ -454,10 +454,7 @@ export class CopyExecutor {
 
       if (result.rows[0].max_id) {
         this.lastProcessedId = result.rows[0].max_id;
-        logger.info({
-          context: 'Resuming from last processed trade',
-          lastProcessedId: this.lastProcessedId,
-        });
+        log.info(`✅ Resuming from trade ID: ${this.lastProcessedId}`);
       } else {
         // Start from most recent trade
         const latestTrade = await db.query(
@@ -465,17 +462,11 @@ export class CopyExecutor {
         );
         if (latestTrade.rows.length > 0) {
           this.lastProcessedId = latestTrade.rows[0].id;
-          logger.info({
-            context: 'Starting from most recent trade',
-            lastProcessedId: this.lastProcessedId,
-          });
+          log.info(`✅ Starting from trade ID: ${this.lastProcessedId}`);
         }
       }
     } catch (error: any) {
-      logger.error({
-        context: 'Failed to initialize last processed ID',
-        error: error.message,
-      });
+      log.error(`❌ Failed to initialize | Error: ${error.message}`);
       this.lastProcessedId = 0;
     }
   }
@@ -614,17 +605,27 @@ export class CopyExecutor {
   }
 
   /**
+   * Get token symbol for display
+   */
+  private getTokenSymbol(mint: string, symbol: string | null | undefined): string {
+    // SOL native mint
+    if (mint === 'So11111111111111111111111111111111111111112') {
+      return 'SOL';
+    }
+    // Use symbol if available, otherwise show truncated mint
+    if (symbol && symbol !== 'Unknown') {
+      return symbol;
+    }
+    return mint.slice(0, 6) + '...';
+  }
+
+  /**
    * Process a single trade
    */
   private async processTrade(trade: LeaderTrade): Promise<void> {
-    logger.info({
-      context: 'Processing leader trade',
-      id: trade.id,
-      wallet: trade.wallet,
-      tokenIn: trade.tokenInSymbol,
-      tokenOut: trade.tokenOutSymbol,
-      amountIn: trade.amountIn,
-    });
+    const tokenInDisplay = this.getTokenSymbol(trade.tokenIn, trade.tokenInSymbol);
+    const tokenOutDisplay = this.getTokenSymbol(trade.tokenOut, trade.tokenOutSymbol);
+    log.info(`👀 Processing trade #${trade.id} | ${tokenInDisplay} → ${tokenOutDisplay}`);
 
     try {
       // Determine if this is a BUY (SOL → Token) or SELL (Token → SOL)
@@ -632,11 +633,7 @@ export class CopyExecutor {
       const isSell = trade.tokenOut === NATIVE_SOL;
 
       if (!isBuy && !isSell) {
-        logger.info({
-          context: 'Skipping token-to-token swap (not SOL)',
-          tokenIn: trade.tokenInSymbol,
-          tokenOut: trade.tokenOutSymbol,
-        });
+        log.info(`⏭️  Skipping token-to-token swap | ${this.getTokenSymbol(trade.tokenIn, trade.tokenInSymbol)} → ${this.getTokenSymbol(trade.tokenOut, trade.tokenOutSymbol)}`);
         return;
       }
 
@@ -648,33 +645,21 @@ export class CopyExecutor {
         );
 
         if (tokenBalance === 0) {
-          logger.info({
-            context: 'Skipping sell - no position in token',
-            token: trade.tokenInSymbol,
-            tokenMint: trade.tokenIn,
-          });
+          log.info(`⏭️  Skipping sell - no position | ${this.getTokenSymbol(trade.tokenIn, trade.tokenInSymbol)}`);
           return;
         }
 
         // Sell 100% of our position when leader sells
         const amountToSell = tokenBalance;
 
-        logger.info({
-          context: 'Processing SELL',
-          token: trade.tokenInSymbol,
-          ourBalance: tokenBalance,
-          sellPercentage: 100,
-          amountToSell,
-        });
+        const tokenDisplay = this.getTokenSymbol(trade.tokenIn, trade.tokenInSymbol);
+        log.info(`🔍 Processing SELL | Balance: ${tokenBalance.toFixed(6)} ${tokenDisplay} (100%)`);
 
         // Convert to smallest unit for Jupiter (assuming 6 decimals for most tokens)
         const amountLamports = Math.floor(amountToSell * LAMPORTS_PER_SOL);
 
         if (amountLamports < 1) {
-          logger.info({
-            context: 'Sell amount too small, skipping',
-            amountToSell,
-          });
+          log.info(`⏭️  Sell amount too small | ${amountToSell.toFixed(6)} ${tokenDisplay}`);
           return;
         }
 
@@ -687,11 +672,7 @@ export class CopyExecutor {
         );
 
         if (!order || !order.transaction) {
-          logger.warn({
-            context: 'Failed to get Jupiter order for sell',
-            inputMint: trade.tokenIn,
-            outputMint: trade.tokenOut,
-          });
+          log.warn(`⚠️  Failed to get Jupiter order for sell | ${this.getTokenSymbol(trade.tokenIn, trade.tokenInSymbol)}`);
           return;
         }
 
@@ -706,14 +687,21 @@ export class CopyExecutor {
         if (signature) {
           const solReceived = parseFloat(order.outAmount) / LAMPORTS_PER_SOL;
 
-          logger.info({
-            context: this.enableLiveTrading ? 'LIVE SELL EXECUTED' : 'PAPER SELL SIMULATED',
-            leaderTradeId: trade.id,
-            signature: signature,
-            tokenSold: trade.tokenInSymbol,
-            amountSold: amountToSell,
-            solReceived,
-          });
+          const action = this.enableLiveTrading ? '🔴 LIVE SELL' : '📝 PAPER SELL';
+          const tokenDisplay = this.getTokenSymbol(trade.tokenIn, trade.tokenInSymbol);
+          log.info('');
+          log.info('────────────────────────────────────────────────────────────────────────────────');
+          log.info('═══════════════════════════════════════════════════');
+          log.info(`${action} EXECUTED`);
+          log.info('═══════════════════════════════════════════════════');
+          log.info(`Trade ID:   #${trade.id}`);
+          log.info(`Wallet:     ${trade.wallet}`);
+          log.info(`Token:      ${tokenDisplay} → SOL`);
+          log.info(`Amount:     ${amountToSell.toFixed(6)} ${tokenDisplay} → ${solReceived.toFixed(6)} SOL`);
+          log.info(`Signature:  ${signature}`);
+          log.info('═══════════════════════════════════════════════════');
+          log.info('────────────────────────────────────────────────────────────────────────────────');
+          log.info('');
 
           await this.recorder.recordCopyAttempt({
             leaderTradeId: trade.id,
@@ -782,11 +770,8 @@ export class CopyExecutor {
 
       // Check if token is blacklisted
       if (this.blacklistedTokens.has(trade.tokenOut)) {
-        logger.warn({
-          context: 'Token blacklisted - skipping buy',
-          token: trade.tokenOutSymbol,
-          tokenMint: trade.tokenOut,
-        });
+        const tokenDisplay = this.getTokenSymbol(trade.tokenOut, trade.tokenOutSymbol);
+        log.warn(`⛔ Token blacklisted | ${tokenDisplay}`);
 
         await this.recorder.recordCopyAttempt({
           leaderTradeId: trade.id,
@@ -838,35 +823,6 @@ export class CopyExecutor {
           calculatedAmountIn: copyAmountIn.toString(),
           status: 'skipped',
           failureReason: `Insufficient balance: ${balanceSOL.toFixed(4)} SOL (min required: ${MIN_BALANCE_FOR_BUYS} SOL)`,
-        });
-
-        return;
-      }
-
-      // Check if token is pumping hard - skip to avoid buying tops
-      const uptrendCheck = await this.isTokenInStrongUptrend(trade.tokenOut);
-      if (uptrendCheck.isUptrend) {
-        logger.warn({
-          context: 'Token pumping hard - skipping buy to avoid top',
-          token: trade.tokenOutSymbol,
-          tokenMint: trade.tokenOut,
-          reason: uptrendCheck.reason,
-        });
-
-        await this.recorder.recordCopyAttempt({
-          leaderTradeId: trade.id,
-          leaderWallet: trade.wallet,
-          leaderSignature: trade.signature,
-          tokenIn: trade.tokenIn,
-          tokenInSymbol: trade.tokenInSymbol,
-          amountIn: trade.amountIn,
-          tokenOut: trade.tokenOut,
-          tokenOutSymbol: trade.tokenOutSymbol,
-          amountOut: trade.amountOut,
-          copyPercentage: this.copyPercentage,
-          calculatedAmountIn: copyAmountIn.toString(),
-          status: 'skipped',
-          failureReason: `Token in strong uptrend: ${uptrendCheck.reason}`,
         });
 
         return;
@@ -927,15 +883,23 @@ export class CopyExecutor {
       );
 
       if (signature) {
-        logger.info({
-          context: this.enableLiveTrading ? 'LIVE BUY EXECUTED' : 'PAPER BUY SIMULATED',
-          leaderTradeId: trade.id,
-          signature: signature,
-          tokenIn: trade.tokenInSymbol,
-          tokenOut: trade.tokenOutSymbol,
-          amountIn: copyAmountIn,
-          expectedOut: parseFloat(order.outAmount) / LAMPORTS_PER_SOL,
-        });
+        const action = this.enableLiveTrading ? '🟢 LIVE BUY' : '📝 PAPER BUY';
+        const tokenDisplay = this.getTokenSymbol(trade.tokenOut, trade.tokenOutSymbol);
+        const expectedOut = parseFloat(order.outAmount) / LAMPORTS_PER_SOL;
+        
+        log.info('');
+        log.info('────────────────────────────────────────────────────────────────────────────────');
+        log.info('═══════════════════════════════════════════════════');
+        log.info(`${action} EXECUTED`);
+        log.info('═══════════════════════════════════════════════════');
+        log.info(`Trade ID:   #${trade.id}`);
+        log.info(`Wallet:     ${trade.wallet}`);
+        log.info(`Token:      SOL → ${tokenDisplay}`);
+        log.info(`Amount:     ${copyAmountIn.toFixed(6)} SOL → ${expectedOut.toFixed(6)} ${tokenDisplay}`);
+        log.info(`Signature:  ${signature}`);
+        log.info('═══════════════════════════════════════════════════');
+        log.info('────────────────────────────────────────────────────────────────────────────────');
+        log.info('');
 
         await this.recorder.recordCopyAttempt({
           leaderTradeId: trade.id,
@@ -1018,7 +982,7 @@ export class CopyExecutor {
    * Stop the copy executor
    */
   stop(): void {
-    logger.info({ context: 'Stopping CopyExecutor service' });
+    log.info('🛑 Stopping Copy Executor service...');
     this.isRunning = false;
   }
 }

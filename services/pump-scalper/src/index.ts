@@ -1,8 +1,8 @@
 /**
- * Copy Executor Service Entry Point
+ * Pump Scalper Service - Entry Point
  */
 
-import { CopyExecutor } from './copy-executor.js';
+import { PumpScalper } from './pump-scalper.js';
 import pino from 'pino';
 import dotenv from 'dotenv';
 import { resolve, dirname } from 'path';
@@ -32,18 +32,39 @@ const logger = pino(
 
 const log = logger.child({ context: 'main' });
 
-const executor = new CopyExecutor();
+// Configuration
+const config = {
+  buyAmountSOL: parseFloat(process.env.SCALPER_BUY_AMOUNT_SOL || '0.05'),
+  profitTargetPercent: parseFloat(process.env.SCALPER_PROFIT_TARGET || '3'),
+  stopLossPercent: parseFloat(process.env.SCALPER_STOP_LOSS || '2'),
+  maxPositions: parseInt(process.env.SCALPER_MAX_POSITIONS || '3'),
+  enableLiveTrading: process.env.SCALPER_ENABLE_LIVE_TRADING === 'true',
+};
+
+// Support criteria
+const supportCriteria = {
+  minUniqueBuyers: parseInt(process.env.SCALPER_MIN_BUYERS || '10'),
+  minBuyersInTimeframe: parseInt(process.env.SCALPER_TIMEFRAME || '60'),
+  minVolumeUSD: parseFloat(process.env.SCALPER_MIN_VOLUME || '1000'),
+  minLiquidityUSD: parseFloat(process.env.SCALPER_MIN_LIQUIDITY || '5000'),
+  minMarketCapUSD: parseFloat(process.env.SCALPER_MIN_MCAP || '10000'),
+  maxMarketCapUSD: parseFloat(process.env.SCALPER_MAX_MCAP || '500000'),
+};
+
+// Initialize scalper
+const rpcUrl = process.env.HELIUS_RPC_URL || process.env.SOLANA_RPC_URL || '';
+const scalper = new PumpScalper(rpcUrl, config, supportCriteria);
 
 // Handle graceful shutdown
 process.on('SIGINT', () => {
   log.info('⚠️  Received SIGINT, shutting down gracefully');
-  executor.stop();
+  scalper.stop();
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
   log.info('⚠️  Received SIGTERM, shutting down gracefully');
-  executor.stop();
+  scalper.stop();
   process.exit(0);
 });
 
@@ -53,12 +74,12 @@ process.on('uncaughtException', (error) => {
   process.exit(1);
 });
 
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', (reason) => {
   log.error(`❌ Unhandled rejection | ${String(reason)}`);
 });
 
 // Start the service
-executor.start().catch((error) => {
+scalper.start().catch((error) => {
   log.error(`❌ Failed to start | ${error.message}`);
   process.exit(1);
 });

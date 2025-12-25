@@ -6,7 +6,6 @@
 import { Keypair } from '@solana/web3.js';
 import * as bip39 from 'bip39';
 import { derivePath } from 'ed25519-hd-key';
-import { config } from './config.js';
 import { logger } from './logger.js';
 
 export class WalletManager {

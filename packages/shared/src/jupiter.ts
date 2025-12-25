@@ -3,7 +3,7 @@
  * Handles swap quotes and transaction building via Jupiter Aggregator
  */
 
-import { Connection, PublicKey, VersionedTransaction } from '@solana/web3.js';
+import { Connection, VersionedTransaction } from '@solana/web3.js';
 import axios from 'axios';
 import { logger } from './logger.js';
 import { config } from './config.js';
@@ -35,7 +35,7 @@ export class JupiterService {
   private connection: Connection;
 
   private constructor() {
-    this.connection = new Connection(config.rpcUrl, 'confirmed');
+    this.connection = new Connection(config.HELIUS_RPC_URL, 'confirmed');
   }
 
   static getInstance(): JupiterService {
