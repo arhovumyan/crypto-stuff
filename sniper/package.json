@@ -1,0 +1,40 @@
+{
+  "name": "@copytrader/sniper",
+  "version": "1.0.0",
+  "description": "Strict Solana Token Sniper - High-quality launch detection and execution",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "solana",
+    "sniper",
+    "trading",
+    "defi"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@copytrader/shared": "file:../packages/shared",
+    "@solana/spl-token": "^0.3.9",
+    "@solana/web3.js": "^1.87.6",
+    "axios": "^1.6.2",
+    "bip39": "^3.1.0",
+    "bs58": "^5.0.0",
+    "dotenv": "^16.3.1",
+    "ed25519-hd-key": "^1.3.0",
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "@types/bip39": "^3.0.0",
+    "@types/bs58": "^4.0.4",
+    "@types/node": "^20.10.4",
+    "@types/ws": "^8.5.10",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}

@@ -29,7 +29,7 @@ const logger = pino({
     target: 'pino-pretty',
     options: {
       colorize: true,
-      translateTime: 'yyyy-mm-dd HH:MM:ss Z',
+      translateTime: 'SYS:yyyy-mm-dd HH:MM:ss',
       ignore: 'pid,hostname',
       messageFormat: '{context} | {msg}',
     },
@@ -44,7 +44,7 @@ const db = new Pool({
 const NATIVE_SOL = 'So11111111111111111111111111111111111111112';
 const POLLING_INTERVAL = 60000; // 60 seconds (1 minute)
 const JUPITER_API_URL = process.env.JUPITER_API_URL || 'https://api.jup.ag';
-const PURCHASE_AMOUNT_SOL = 10; // Always buy $10 worth
+const PURCHASE_AMOUNT_SOL = 0.2; // Always buy 0.2 SOL worth
 
 export class TenDollarMonster {
   private connection: Connection;
