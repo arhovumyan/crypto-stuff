@@ -1,0 +1,37 @@
+{
+  "runId": "sim_1766772030215_jpg8p752d",
+  "datasetPath": "./swaps_2025-12-26.jsonl",
+  "datasetHash": "e926993af1c293d5",
+  "configHash": "8f9c7530c9496aad",
+  "startTime": "2025-12-26T18:00:30.215Z",
+  "endTime": "2025-12-26T18:00:30.227Z",
+  "durationDays": 1.3888888888888888e-7,
+  "summary": {
+    "totalTrades": 0,
+    "winningTrades": 0,
+    "losingTrades": 0,
+    "winRate": 0,
+    "totalPnLSOL": 0,
+    "netPnLSOL": 0,
+    "totalFeesSOL": 0,
+    "maxDrawdownSOL": 0,
+    "maxDrawdownPct": 0,
+    "avgHoldingTimeMs": 0,
+    "expectancy": 0,
+    "sharpeRatio": 0
+  },
+  "marketCoverage": {
+    "totalEvents": 0,
+    "totalSwaps": 0,
+    "uniqueTokens": 0,
+    "uniqueTraders": 0,
+    "largeSellsDetected": 0,
+    "absorptionsConfirmed": 0,
+    "stabilizationsConfirmed": 0,
+    "signalsGenerated": 0
+  },
+  "trades": [],
+  "walletAnalytics": [],
+  "equityCurve": [],
+  "drawdownCurve": []
+}

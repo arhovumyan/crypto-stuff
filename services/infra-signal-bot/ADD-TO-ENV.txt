@@ -1,0 +1,44 @@
+================================================================================
+ADD THESE LINES TO YOUR .env FILE
+================================================================================
+
+Location: /Users/aro/Documents/Trading/CopyTrader/.env
+
+Copy and paste these lines into your .env file:
+
+# -----------------------------------------------------------------------------
+# Known Infrastructure Wallets (Pre-Seeded)
+# Format: Known_Infra_Wallets_N where N is 1, 2, 3, etc.
+# These wallets are treated as confirmed infra wallets from the start
+# -----------------------------------------------------------------------------
+Known_Infra_Wallets_1=eGkFSm9YaJ92gEUssj9SRzGwkxsLrpjq6Q5YbKQ9sUf
+Known_Infra_Wallets_2=Ar2Y6o1QmrRAskjii1cRfijeKugHH13ycxW5cd7rro1x
+Known_Infra_Wallets_3=ERBVcqUW8CyLF26CpZsMzi1Fq3pB8d8q5LswRiWk7jwT
+Known_Infra_Wallets_4=5eKXMMPUQBN1utwx9Vsqz5ZfGbSSAm7GL1Jzy5eexbyv
+Known_Infra_Wallets_5=FSkmRPArUnFFGZuRUdZ1W7vh5Hm7KqgjDQ19UBjW2kbC
+Known_Infra_Wallets_6=7jDVmS8HBdDNdtGXSxepjcktvG6FzbPurZvYUVgY7TG5
+
+================================================================================
+AFTER ADDING, RESTART THE BOT
+================================================================================
+
+cd /Users/aro/Documents/Trading/CopyTrader/services/infra-signal-bot
+npm run dev
+
+================================================================================
+VERIFY WALLETS ARE LOADED
+================================================================================
+
+Look for these log messages:
+
+✅ Loaded 6 known infra wallets from environment
+✅ Seeded 6 pre-configured infra wallets into database
+✅ Loaded 6 known infra wallets from database
+
+Check database:
+
+psql "postgresql://copytrader:copytrader_dev_password@localhost:5432/copytrader" \
+  -c "SELECT address, confidence_score FROM infra_wallets LIMIT 10;"
+
+================================================================================
+
