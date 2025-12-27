@@ -1,0 +1,67 @@
+[
+  {
+    "id": "4ZQB1ZGCYh4RWs8kShUnm21RbdxWJevkPrqfjsS53oG5-1766793328024",
+    "token": "4ZQB1ZGCYh4RWs8kShUnm21RbdxWJevkPrqfjsS53oG5",
+    "entryTime": "2025-12-26T23:55:28.024Z",
+    "entryTimestamp": 1766793328.024,
+    "entryPrice": 0.002887,
+    "entryAmountSol": 0.1,
+    "entryAmountToken": 3463.803255975061,
+    "entrySignature": "PAPER_1766793328024",
+    "triggeredByWallet": "5eKXMMPUQBN1utwx9Vsqz5ZfGbSSAm7GL1Jzy5eexbyv",
+    "status": "open",
+    "isPaperTrade": true
+  },
+  {
+    "id": "DaWcm2Ja73Pa8cu4bU9yuoMAbuVYiGFeqLtKh4a4GTg-1766793328027",
+    "token": "DaWcm2Ja73Pa8cu4bU9yuoMAbuVYiGFeqLtKh4a4GTg",
+    "entryTime": "2025-12-26T23:55:28.027Z",
+    "entryTimestamp": 1766793328.027,
+    "entryPrice": 0.0004032,
+    "entryAmountSol": 0.1,
+    "entryAmountToken": 24801.587301587304,
+    "entrySignature": "PAPER_1766793328027",
+    "triggeredByWallet": "5eKXMMPUQBN1utwx9Vsqz5ZfGbSSAm7GL1Jzy5eexbyv",
+    "status": "open",
+    "isPaperTrade": true
+  },
+  {
+    "id": "3eqzsw3f4R4c5VxHMsphtuGJEzE55E6sy7HLauTp9c5d-1766793338025",
+    "token": "3eqzsw3f4R4c5VxHMsphtuGJEzE55E6sy7HLauTp9c5d",
+    "entryTime": "2025-12-26T23:55:38.025Z",
+    "entryTimestamp": 1766793338.025,
+    "entryPrice": 0.0003606,
+    "entryAmountSol": 0.1,
+    "entryAmountToken": 27731.558513588465,
+    "entrySignature": "PAPER_1766793338025",
+    "triggeredByWallet": "5eKXMMPUQBN1utwx9Vsqz5ZfGbSSAm7GL1Jzy5eexbyv",
+    "status": "open",
+    "isPaperTrade": true
+  },
+  {
+    "id": "2QEQdA12ZKaNToMRL1qaRq2HFSf5b2cHU9hUhMw2AJaJ-1766793348027",
+    "token": "2QEQdA12ZKaNToMRL1qaRq2HFSf5b2cHU9hUhMw2AJaJ",
+    "entryTime": "2025-12-26T23:55:48.027Z",
+    "entryTimestamp": 1766793348.027,
+    "entryPrice": 0.0004547,
+    "entryAmountSol": 0.1,
+    "entryAmountToken": 21992.522542335606,
+    "entrySignature": "PAPER_1766793348027",
+    "triggeredByWallet": "5eKXMMPUQBN1utwx9Vsqz5ZfGbSSAm7GL1Jzy5eexbyv",
+    "status": "open",
+    "isPaperTrade": true
+  },
+  {
+    "id": "B9ftouD2mGxmam3TUxVYtcDg6tnD7ZDozdgcGua84YQ4-1766793348031",
+    "token": "B9ftouD2mGxmam3TUxVYtcDg6tnD7ZDozdgcGua84YQ4",
+    "entryTime": "2025-12-26T23:55:48.031Z",
+    "entryTimestamp": 1766793348.031,
+    "entryPrice": 0.0003523,
+    "entryAmountSol": 0.1,
+    "entryAmountToken": 28384.89923360772,
+    "entrySignature": "PAPER_1766793348031",
+    "triggeredByWallet": "5eKXMMPUQBN1utwx9Vsqz5ZfGbSSAm7GL1Jzy5eexbyv",
+    "status": "open",
+    "isPaperTrade": true
+  }
+]

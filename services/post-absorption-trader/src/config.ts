@@ -9,9 +9,8 @@ export const config = {
   rpcUrl: process.env.HELIUS_RPC_URL || process.env.SOLANA_RPC_URL!,
   wsUrl: process.env.HELIUS_WS_URL!,
   
-  // Database & Redis
+  // Database
   databaseUrl: process.env.DATABASE_URL!,
-  redisUrl: process.env.REDIS_URL || 'redis://localhost:6379',
   
   // Known Infrastructure Wallets (the wallets that absorb sell pressure)
   infraWallets: [
@@ -25,18 +24,24 @@ export const config = {
   
   // Your Trading Wallet
   myWalletAddress: process.env.MY_WALLET_ADDRESS!,
-  copyWalletPrivateKey: process.env.COPY_WALLET_PRIVATE_KEY!,
+  copyWalletPrivateKey: process.env.COPY_WALLET_SEED_PHRASE!,
   
   // Post-Absorption Trading Parameters
   absorption: {
     // Minimum sell volume that qualifies as "large sell pressure" (in USD)
-    minSellVolumeUsd: parseFloat(process.env.ABSORPTION_MIN_SELL_VOLUME_USD || '10000'),
+    minSellVolumeUsd: parseFloat(process.env.ABSORPTION_MIN_SELL_VOLUME_USD || '1000'),
     
-    // Minimum infra wallet buy volume to consider it "absorption" (in USD)
-    minInfraBuyVolumeUsd: parseFloat(process.env.ABSORPTION_MIN_INFRA_BUY_USD || '5000'),
+    // Minimum infra wallet buy volume to consider it "absorption" (in SOL)
+    minInfraBuyVolumeSol: parseFloat(process.env.ABSORPTION_MIN_INFRA_BUY_SOL || '0.3'),
+    
+    // Minimum infra wallet buy volume to consider it "absorption" (in USD) - DEPRECATED, use SOL
+    minInfraBuyVolumeUsd: parseFloat(process.env.ABSORPTION_MIN_INFRA_BUY_USD || '50'),
     
     // Ratio: infra buy volume / sell volume (e.g., 0.5 = absorbed 50% of sells)
-    minAbsorptionRatio: parseFloat(process.env.ABSORPTION_MIN_RATIO || '0.3'),
+    minAbsorptionRatio: parseFloat(process.env.ABSORPTION_MIN_RATIO || '0.2'),
+    
+    // Minimum price drop to consider it an absorption opportunity (%)
+    minPriceDropPercent: parseFloat(process.env.ABSORPTION_MIN_PRICE_DROP || '3'),
     
     // Time window to look for sell pressure before infra wallet buy (seconds)
     sellPressureWindowSec: parseInt(process.env.ABSORPTION_SELL_WINDOW_SEC || '120'),
@@ -48,19 +53,19 @@ export const config = {
   // Stabilization Confirmation Parameters
   stabilization: {
     // How long to monitor for stability after absorption (seconds)
-    monitorDurationSec: parseInt(process.env.STABILIZATION_MONITOR_SEC || '180'),
+    monitorDurationSec: parseInt(process.env.STABILIZATION_MONITOR_SEC || '60'),
     
     // Maximum price volatility allowed during stabilization (%)
-    maxVolatilityPercent: parseFloat(process.env.STABILIZATION_MAX_VOLATILITY || '5'),
+    maxVolatilityPercent: parseFloat(process.env.STABILIZATION_MAX_VOLATILITY || '10'),
     
     // Minimum number of price samples required
-    minPriceSamples: parseInt(process.env.STABILIZATION_MIN_SAMPLES || '6'),
+    minPriceSamples: parseInt(process.env.STABILIZATION_MIN_SAMPLES || '2'),
     
     // Price must be above this % of the absorption price to enter
-    minPriceRecoveryPercent: parseFloat(process.env.STABILIZATION_MIN_RECOVERY || '0'),
+    minPriceRecoveryPercent: parseFloat(process.env.STABILIZATION_MIN_RECOVERY || '-5'),
     
     // Maximum price deviation from moving average (%)
-    maxPriceDeviationPercent: parseFloat(process.env.STABILIZATION_MAX_DEVIATION || '3'),
+    maxPriceDeviationPercent: parseFloat(process.env.STABILIZATION_MAX_DEVIATION || '8'),
   },
   
   // Entry Parameters
@@ -72,28 +77,37 @@ export const config = {
     maxSlippageBps: parseInt(process.env.ABSORPTION_MAX_SLIPPAGE_BPS || '100'),
     
     // Minimum liquidity required to enter (in USD)
-    minLiquidityUsd: parseFloat(process.env.ABSORPTION_MIN_LIQUIDITY_USD || '50000'),
+    minLiquidityUsd: parseFloat(process.env.ABSORPTION_MIN_LIQUIDITY_USD || '5000'),
     
     // Maximum concurrent positions
     maxPositions: parseInt(process.env.ABSORPTION_MAX_POSITIONS || '5'),
     
     // Cooldown between trades on same token (seconds)
-    tokenCooldownSec: parseInt(process.env.ABSORPTION_TOKEN_COOLDOWN_SEC || '3600'),
+    tokenCooldownSec: parseInt(process.env.ABSORPTION_TOKEN_COOLDOWN_SEC || '300'),
   },
   
   // Exit Strategy Parameters
+  // TIERED EXIT STRATEGY:
+  // - 50% profit → sell 100%
+  // - 30% profit → sell 50%
+  // - 20% loss → sell 100%
   exit: {
-    // Profit target (%)
-    profitTargetPercent: parseFloat(process.env.ABSORPTION_PROFIT_TARGET || '20'),
+    // Full exit profit target (%)
+    fullExitProfitPercent: parseFloat(process.env.ABSORPTION_FULL_EXIT_PROFIT || '50'),
+    
+    // Partial exit profit target (%)
+    partialExitProfitPercent: parseFloat(process.env.ABSORPTION_PARTIAL_EXIT_PROFIT || '30'),
+    
+    // Partial exit sell percentage
+    partialExitSellPercent: parseFloat(process.env.ABSORPTION_PARTIAL_SELL_PERCENT || '50'),
     
     // Stop loss (%)
-    stopLossPercent: parseFloat(process.env.ABSORPTION_STOP_LOSS || '15'),
+    stopLossPercent: parseFloat(process.env.ABSORPTION_STOP_LOSS || '20'),
     
-    // Trailing stop activation (%)
-    trailingStopActivationPercent: parseFloat(process.env.ABSORPTION_TRAILING_ACTIVATION || '15'),
-    
-    // Trailing stop distance (%)
-    trailingStopDistancePercent: parseFloat(process.env.ABSORPTION_TRAILING_DISTANCE || '8'),
+    // Legacy - kept for compatibility
+    profitTargetPercent: parseFloat(process.env.ABSORPTION_PROFIT_TARGET || '50'),
+    trailingStopActivationPercent: parseFloat(process.env.ABSORPTION_TRAILING_ACTIVATION || '30'),
+    trailingStopDistancePercent: parseFloat(process.env.ABSORPTION_TRAILING_DISTANCE || '10'),
     
     // Maximum position hold time (seconds)
     maxHoldTimeSec: parseInt(process.env.ABSORPTION_MAX_HOLD_TIME_SEC || '86400'), // 24 hours
@@ -119,7 +133,8 @@ export const config = {
   logLevel: process.env.LOG_LEVEL || 'info',
   
   // Jupiter API
-  jupiterApiUrl: process.env.JUPITER_API_URL || 'https://quote-api.jup.ag/v6',
+  jupiterApiUrl: process.env.JUPITER_API_URL || 'https://api.jup.ag',
+  jupiterApiKey: process.env.JUPITER_API_KEY || '',
 };
 
 // Validation

@@ -1,0 +1,67 @@
+[
+  {
+    "id": "3eqzsw3f4R4c5VxHMsphtuGJEzE55E6sy7HLauTp9c5d-1766795368471",
+    "token": "3eqzsw3f4R4c5VxHMsphtuGJEzE55E6sy7HLauTp9c5d",
+    "entryTime": "2025-12-27T00:29:28.471Z",
+    "entryTimestamp": 1766795368.471,
+    "entryPrice": 0.0004349,
+    "entryAmountSol": 0.1,
+    "entryAmountToken": 27706976624,
+    "entrySignature": "5CP8JoU5mVfNiS2q1o94ZYumcXRqAt4R9NiEK77eNenTJt2UsAvFCLtfHm5rfwDuKKxLKXMuVGj9ruVmV5jw2qoE",
+    "triggeredByWallet": "5eKXMMPUQBN1utwx9Vsqz5ZfGbSSAm7GL1Jzy5eexbyv",
+    "status": "open",
+    "isPaperTrade": false
+  },
+  {
+    "id": "B9ftouD2mGxmam3TUxVYtcDg6tnD7ZDozdgcGua84YQ4-1766795370290",
+    "token": "B9ftouD2mGxmam3TUxVYtcDg6tnD7ZDozdgcGua84YQ4",
+    "entryTime": "2025-12-27T00:29:30.290Z",
+    "entryTimestamp": 1766795370.29,
+    "entryPrice": 0.0004247,
+    "entryAmountSol": 0.1,
+    "entryAmountToken": 28417617550,
+    "entrySignature": "57dF13Z91uoytmmRzVWBTE69TrV6Er144swggZRrUJaZMS91ySJw3mkZF6KvNJHronL4sb1NMPRPXnQ5YTWa7q67",
+    "triggeredByWallet": "5eKXMMPUQBN1utwx9Vsqz5ZfGbSSAm7GL1Jzy5eexbyv",
+    "status": "open",
+    "isPaperTrade": false
+  },
+  {
+    "id": "4ZQB1ZGCYh4RWs8kShUnm21RbdxWJevkPrqfjsS53oG5-1766795371803",
+    "token": "4ZQB1ZGCYh4RWs8kShUnm21RbdxWJevkPrqfjsS53oG5",
+    "entryTime": "2025-12-27T00:29:31.803Z",
+    "entryTimestamp": 1766795371.803,
+    "entryPrice": 0.003612,
+    "entryAmountSol": 0.1,
+    "entryAmountToken": 3353572063,
+    "entrySignature": "4HRd99sNG4iaPLhCvizCvkE29HsZYBcf4pd6JhKRoChFTYqbBJhQ3ijhEWXYYxqeedxezVebJMFvjVfXkawx1cKQ",
+    "triggeredByWallet": "5eKXMMPUQBN1utwx9Vsqz5ZfGbSSAm7GL1Jzy5eexbyv",
+    "status": "open",
+    "isPaperTrade": false
+  },
+  {
+    "id": "DaWcm2Ja73Pa8cu4bU9yuoMAbuVYiGFeqLtKh4a4GTg-1766795373773",
+    "token": "DaWcm2Ja73Pa8cu4bU9yuoMAbuVYiGFeqLtKh4a4GTg",
+    "entryTime": "2025-12-27T00:29:33.773Z",
+    "entryTimestamp": 1766795373.773,
+    "entryPrice": 0.0004971,
+    "entryAmountSol": 0.1,
+    "entryAmountToken": 24293331402,
+    "entrySignature": "5Hsrhz1rxf7uPyHK9R9iuPSc3Ywv19ZQttGwyW7AaJ6x3bAtKfAm97FgkmDc8PoQzoWVi7p4pGXF36RYTzKPn5W6",
+    "triggeredByWallet": "5eKXMMPUQBN1utwx9Vsqz5ZfGbSSAm7GL1Jzy5eexbyv",
+    "status": "open",
+    "isPaperTrade": false
+  },
+  {
+    "id": "BpU2dKLsPQsETB1WVYTgGQnJ13pqiRcMxHaiuM2HmYbE-1766795375630",
+    "token": "BpU2dKLsPQsETB1WVYTgGQnJ13pqiRcMxHaiuM2HmYbE",
+    "entryTime": "2025-12-27T00:29:35.630Z",
+    "entryTimestamp": 1766795375.63,
+    "entryPrice": 0.0003433,
+    "entryAmountSol": 0.1,
+    "entryAmountToken": 35591695504,
+    "entrySignature": "542UqFsHqPFgFiZtEs5Fo4wPa3q5gNQzYLsH44vqBqCUBoKV2xhi811vQ6M6rVk9BHDP1qcVLvyVd8MdjVr4Svyf",
+    "triggeredByWallet": "5eKXMMPUQBN1utwx9Vsqz5ZfGbSSAm7GL1Jzy5eexbyv",
+    "status": "open",
+    "isPaperTrade": false
+  }
+]

@@ -1,4 +1,3 @@
-// Connection not currently used but reserved for future RPC calls
 import { config } from './config';
 import logger from './logger';
 import {
@@ -6,6 +5,8 @@ import {
   StabilizationAnalysis,
   MarketData,
 } from './types';
+import { MarketDataService } from './marketDataService';
+import { VolumeAnalyzer } from './volumeAnalyzer';
 
 /**
  * StabilizationMonitor confirms that price has stabilized after absorption
@@ -19,15 +20,21 @@ import {
  * This ensures we're not catching a falling knife - we enter AFTER stability is confirmed
  */
 export class StabilizationMonitor {
+  private marketDataService: MarketDataService;
+  private volumeAnalyzer: VolumeAnalyzer;
+  
   // Track price samples for each token
   private priceSamples: Map<string, Array<{ timestamp: number; price: number }>> = new Map();
   
   // Track market data
   private marketData: Map<string, MarketData> = new Map();
 
-  constructor() {
+  constructor(volumeAnalyzer: VolumeAnalyzer) {
+    this.marketDataService = new MarketDataService();
+    this.volumeAnalyzer = volumeAnalyzer;
+    
     // Monitor prices periodically
-    setInterval(() => this.updatePrices(), 30000); // Every 30 seconds
+    setInterval(() => this.updatePrices(), 15000); // Every 15 seconds for faster samples
   }
 
   /**
@@ -75,13 +82,16 @@ export class StabilizationMonitor {
       );
     }
 
-    // Calculate price statistics
+    // Calculate price statistics (use USD for consistency)
     const prices = samples.map(s => s.price);
-    const currentPrice = marketData.price;
+    const currentPrice = marketData.priceUsd; // Use USD price
     const averagePrice = prices.reduce((sum, p) => sum + p, 0) / prices.length;
     const priceVolatility = this.calculateVolatility(prices);
     const priceDeviation = Math.abs((currentPrice - averagePrice) / averagePrice) * 100;
-    const priceRecovery = ((currentPrice - event.priceAtAbsorption) / event.priceAtAbsorption) * 100;
+    // Compare current USD price to absorption USD price
+    const priceRecovery = event.priceAtAbsorption > 0 
+      ? ((currentPrice - event.priceAtAbsorption) / event.priceAtAbsorption) * 100
+      : 0;
 
     // Track passed/failed checks
     const passedChecks: string[] = [];
@@ -116,13 +126,15 @@ export class StabilizationMonitor {
     }
 
     // Check 5: Volume analysis (buy vs sell)
+    // Note: We only track infra wallets, so this ratio reflects infra behavior, not market
     const recentVolume = this.analyzeRecentVolume(token);
     const volumeRatio = recentVolume.buyVolume / (recentVolume.sellVolume || 1);
     
-    if (volumeRatio >= 1.0) {
-      passedChecks.push(`Volume balanced (buy/sell: ${volumeRatio.toFixed(2)})`);
+    // Relaxed threshold: 0.5 instead of 1.0 since we only see infra wallets
+    if (volumeRatio >= 0.5) {
+      passedChecks.push(`Volume acceptable (buy/sell: ${volumeRatio.toFixed(2)})`);
     } else {
-      failedChecks.push(`Selling pressure continues (buy/sell: ${volumeRatio.toFixed(2)})`);
+      failedChecks.push(`Heavy selling (buy/sell: ${volumeRatio.toFixed(2)})`);
     }
 
     // Calculate stability score (0-100)
@@ -202,14 +214,15 @@ export class StabilizationMonitor {
 
   /**
    * Analyze recent volume (buy vs sell)
-   * In production, this would query actual transaction data
+   * Uses real transaction data from VolumeAnalyzer
    */
-  private analyzeRecentVolume(_token: string): { buyVolume: number; sellVolume: number } {
-    // Placeholder - in production, query recent transactions
-    // For now, assume balanced volume if we reached this point
+  private analyzeRecentVolume(token: string): { buyVolume: number; sellVolume: number } {
+    // Get volume from last 5 minutes (300 seconds)
+    const volumeData = this.volumeAnalyzer.analyzeRecentVolume(token, 300);
+    
     return {
-      buyVolume: 100,
-      sellVolume: 80,
+      buyVolume: volumeData.buyVolume,
+      sellVolume: volumeData.sellVolume,
     };
   }
 
@@ -226,7 +239,7 @@ export class StabilizationMonitor {
           const samples = this.priceSamples.get(token) || [];
           samples.push({
             timestamp: Date.now() / 1000,
-            price: marketData.price,
+            price: marketData.priceUsd, // Use USD for consistency
           });
           
           // Keep only recent samples (last hour)
@@ -242,23 +255,22 @@ export class StabilizationMonitor {
 
   /**
    * Fetch current market data for a token
-   * In production, this would use Jupiter/DexScreener API
+   * Uses Jupiter and DexScreener APIs for real price data
    */
   private async fetchMarketData(token: string): Promise<void> {
     try {
-      // Placeholder - in production, query real market data
-      // For now, generate mock data
-      const mockData: MarketData = {
-        token,
-        price: Math.random() * 0.001 + 0.0001,
-        priceUsd: Math.random() * 0.1 + 0.01,
-        liquidityUsd: Math.random() * 100000 + 50000,
-        volume24hUsd: Math.random() * 500000 + 100000,
-        priceChange24hPercent: (Math.random() - 0.5) * 20,
-        timestamp: Date.now() / 1000,
-      };
-
-      this.marketData.set(token, mockData);
+      // Fetch real market data from Jupiter/DexScreener
+      const marketData = await this.marketDataService.fetchMarketData(token);
+      
+      if (marketData) {
+        this.marketData.set(token, marketData);
+        logger.debug(
+          `[StabilizationMonitor] Real price for ${token.slice(0, 8)}: ` +
+          `$${marketData.priceUsd.toFixed(6)} (${marketData.price.toFixed(9)} SOL)`
+        );
+      } else {
+        logger.warn(`[StabilizationMonitor] Could not fetch market data for ${token.slice(0, 8)}`);
+      }
     } catch (error) {
       logger.error(`[StabilizationMonitor] Error fetching market data for ${token}:`, error);
     }

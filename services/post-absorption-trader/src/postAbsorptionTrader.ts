@@ -4,6 +4,7 @@ import { WalletListener } from './walletListener';
 import { AbsorptionDetector } from './absorptionDetector';
 import { StabilizationMonitor } from './stabilizationMonitor';
 import { TradingExecutor } from './tradingExecutor';
+import { VolumeAnalyzer } from './volumeAnalyzer';
 
 /**
  * PostAbsorptionTrader - Main orchestrator
@@ -23,13 +24,15 @@ import { TradingExecutor } from './tradingExecutor';
 export class PostAbsorptionTrader {
   private walletListener: WalletListener;
   private absorptionDetector: AbsorptionDetector;
+  private volumeAnalyzer: VolumeAnalyzer;
   private stabilizationMonitor: StabilizationMonitor;
   private tradingExecutor: TradingExecutor;
 
   constructor() {
     this.walletListener = new WalletListener();
     this.absorptionDetector = new AbsorptionDetector();
-    this.stabilizationMonitor = new StabilizationMonitor();
+    this.volumeAnalyzer = new VolumeAnalyzer();
+    this.stabilizationMonitor = new StabilizationMonitor(this.volumeAnalyzer);
     this.tradingExecutor = new TradingExecutor();
   }
 
@@ -47,12 +50,20 @@ export class PostAbsorptionTrader {
     logger.info('This is NOT copy trading. This is NOT front-running.');
     logger.info('We wait for absorption + stabilization, then enter the new equilibrium.');
     logger.info('');
+    logger.info('🔍 Using REAL price data from Jupiter & DexScreener APIs');
+    logger.info('📊 Using REAL volume analysis from transaction monitoring');
+    logger.info('');
     logger.info('='.repeat(80));
     logger.info('');
 
-    // Set up transaction handler
-    this.walletListener.onTransaction((tx) => {
-      this.absorptionDetector.processTransaction(tx);
+    // Set up transaction handler - feed to both absorption detector and volume analyzer
+    this.walletListener.onTransaction(async (tx) => {
+      try {
+        await this.absorptionDetector.processTransaction(tx);
+        this.volumeAnalyzer.addTransaction(tx);
+      } catch (error) {
+        logger.error('[PostAbsorptionTrader] Error processing transaction:', error);
+      }
     });
 
     // Start wallet listener
@@ -60,6 +71,9 @@ export class PostAbsorptionTrader {
 
     // Start main monitoring loop
     this.startMonitoringLoop();
+    
+    // Cleanup old volume data periodically
+    setInterval(() => this.volumeAnalyzer.cleanup(), 300000); // Every 5 minutes
 
     logger.info('[PostAbsorptionTrader] System started successfully');
     logger.info('');
@@ -77,7 +91,7 @@ export class PostAbsorptionTrader {
       } catch (error) {
         logger.error('[PostAbsorptionTrader] Error in monitoring loop:', error);
       }
-    }, 30000); // Every 30 seconds
+    }, 10000); // Every 10 seconds for faster response
   }
 
   /**

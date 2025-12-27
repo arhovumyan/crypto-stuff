@@ -4,20 +4,26 @@ import {
   Transaction,
   SellPressureEvent,
   AbsorptionEvent,
+  MarketData,
 } from './types';
+import { MarketDataService } from './marketDataService';
 
 /**
- * AbsorptionDetector identifies when infrastructure wallets absorb large sell pressure
+ * AbsorptionDetector identifies when infrastructure wallets absorb price dips
  * 
- * Key Concept: We look for patterns where:
- * 1. Large sell pressure occurs on a token
- * 2. Infrastructure wallets step in and buy
- * 3. The buy volume is significant relative to the sell pressure
+ * NEW APPROACH (infra-only monitoring):
+ * Since we only track infra wallets, we can't see non-infra sells directly.
+ * Instead, we detect absorption by:
+ * 1. Observing when infra wallets BUY a token
+ * 2. Checking if the token's price recently dropped (from market data APIs)
+ * 3. If price dropped significantly AND infra is buying → this is absorption
  * 
  * This is NOT front-running - we detect AFTER the absorption has occurred
  */
 export class AbsorptionDetector {
-  // Track recent transactions by token
+  private marketDataService: MarketDataService;
+  
+  // Track recent infra transactions by token
   private recentTransactions: Map<string, Transaction[]> = new Map();
   
   // Track detected absorption events
@@ -25,16 +31,21 @@ export class AbsorptionDetector {
   
   // Track tokens on cooldown (recently processed)
   private tokenCooldowns: Map<string, number> = new Map();
+  
+  // Track price history for tokens (to detect drops)
+  private priceHistory: Map<string, Array<{ price: number; timestamp: number }>> = new Map();
 
   constructor() {
+    this.marketDataService = new MarketDataService();
+    
     // Clean up old data periodically
     setInterval(() => this.cleanup(), 60000); // Every minute
   }
 
   /**
-   * Process a new transaction from any wallet
+   * Process a new transaction from infra wallet
    */
-  processTransaction(tx: Transaction): void {
+  async processTransaction(tx: Transaction): Promise<void> {
     const token = tx.token;
     
     // Add to recent transactions
@@ -43,9 +54,9 @@ export class AbsorptionDetector {
     }
     this.recentTransactions.get(token)!.push(tx);
 
-    // If this is an infra wallet BUY, check for absorption
+    // If this is an infra wallet BUY, check for absorption opportunity
     if (tx.type === 'buy' && this.isInfraWallet(tx.wallet)) {
-      this.checkForAbsorption(token);
+      await this.checkForAbsorption(token, tx);
     }
   }
 
@@ -57,9 +68,10 @@ export class AbsorptionDetector {
   }
 
   /**
-   * Check if we've detected an absorption event for this token
+   * Check if this infra buy represents an absorption event
+   * We detect absorption by checking if price recently dropped
    */
-  private checkForAbsorption(token: string): void {
+  private async checkForAbsorption(token: string, buyTx: Transaction): Promise<void> {
     // Check cooldown
     if (this.isOnCooldown(token)) {
       return;
@@ -68,66 +80,110 @@ export class AbsorptionDetector {
     const now = Date.now() / 1000;
     const transactions = this.recentTransactions.get(token) || [];
 
-    // Get recent transactions within the absorption window
+    // Get recent infra buys within the absorption window
     const windowStart = now - config.absorption.absorptionWindowSec;
-    const recentTxs = transactions.filter(tx => tx.blockTime >= windowStart);
+    const recentInfraBuys = transactions.filter(
+      tx => tx.type === 'buy' && 
+            tx.blockTime >= windowStart && 
+            this.isInfraWallet(tx.wallet)
+    );
 
-    if (recentTxs.length === 0) {
+    if (recentInfraBuys.length === 0) {
       return;
     }
 
-    // Identify sell pressure
-    const sellPressure = this.identifySellPressure(recentTxs, now);
+    // Calculate total infra buy volume
+    const totalInfraBuyVolumeUsd = recentInfraBuys.reduce((sum, tx) => sum + tx.amountUsd, 0);
+    const totalInfraBuyVolumeSol = recentInfraBuys.reduce((sum, tx) => sum + tx.amountSol, 0);
+
+    // Check minimum buy volume (using SOL, not USD)
+    if (totalInfraBuyVolumeSol < config.absorption.minInfraBuyVolumeSol) {
+      logger.debug(`[AbsorptionDetector] ⏭️ ${token.slice(0, 8)}: Buy volume ${totalInfraBuyVolumeSol.toFixed(3)} SOL < ${config.absorption.minInfraBuyVolumeSol} SOL (skipping)`);
+      return;
+    }
+
+    // Fetch real market data to check for price drop
+    logger.info(`[AbsorptionDetector] Checking infra BUY: ${token.slice(0, 8)} (${totalInfraBuyVolumeSol.toFixed(4)} SOL)`);
+    const marketData = await this.marketDataService.fetchMarketData(token);
     
-    if (!sellPressure) {
-      return; // No significant sell pressure
+    if (!marketData) {
+      logger.info(`[AbsorptionDetector] ❌ Could not fetch market data for ${token.slice(0, 8)}`);
+      return;
     }
-
-    // Identify infra wallet absorption
-    const infraBuys = this.identifyInfraBuys(recentTxs, sellPressure.endTime, now);
     
-    if (infraBuys.length === 0) {
-      return; // No infra wallet activity
+    logger.info(`[AbsorptionDetector] 📊 ${token.slice(0, 8)}: Price $${marketData.priceUsd.toFixed(6)}, 24h: ${marketData.priceChange24hPercent.toFixed(1)}%, Liq: $${marketData.liquidityUsd.toFixed(0)}`);
+
+    // Check if price recently dropped (using 24h change as proxy for recent drop)
+    const priceDropPercent = -marketData.priceChange24hPercent; // Negative change = drop
+    
+    // Also check our own price history if available
+    const recentPriceDrop = this.checkRecentPriceDrop(token, marketData.priceUsd);
+
+    // Use the larger of the two drop indicators
+    const effectiveDrop = Math.max(priceDropPercent, recentPriceDrop);
+
+    // Check if this qualifies as absorption
+    // Option 1: Traditional absorption = price dropped + infra buying
+    // Option 2: Strong infra accumulation = high buy volume regardless of drop
+    const minDropPercent = config.absorption.minPriceDropPercent || 3;
+    const minStrongBuySol = config.absorption.minInfraBuyVolumeSol * 5; // 5x normal = strong signal
+    
+    const isTraditionalAbsorption = effectiveDrop >= minDropPercent;
+    const isStrongAccumulation = totalInfraBuyVolumeSol >= minStrongBuySol;
+    
+    if (!isTraditionalAbsorption && !isStrongAccumulation) {
+      logger.info(
+        `[AbsorptionDetector] ⏭️ ${token.slice(0, 8)}: Drop ${effectiveDrop.toFixed(1)}% < ${minDropPercent}% and buy ${totalInfraBuyVolumeSol.toFixed(4)} SOL < ${minStrongBuySol.toFixed(4)} SOL (skipping)`
+      );
+      return;
     }
+    
+    const signalType = isTraditionalAbsorption ? 'DIP_ABSORPTION' : 'STRONG_ACCUMULATION';
+    logger.info(`[AbsorptionDetector] ✅ Signal type: ${signalType}`);
 
-    // Calculate absorption metrics
-    const totalInfraBuyVolumeUsd = infraBuys.reduce((sum, tx) => sum + tx.amountUsd, 0);
-    const totalInfraBuyVolumeSol = infraBuys.reduce((sum, tx) => sum + tx.amountSol, 0);
-    const absorptionRatio = totalInfraBuyVolumeUsd / sellPressure.totalSellVolumeUsd;
-
-    // Check if absorption meets criteria
-    if (totalInfraBuyVolumeUsd < config.absorption.minInfraBuyVolumeUsd) {
-      logger.debug(`[AbsorptionDetector] Token ${token.slice(0, 8)}: Infra buy volume too low ($${totalInfraBuyVolumeUsd.toFixed(2)} < $${config.absorption.minInfraBuyVolumeUsd})`);
+    // Check liquidity requirement
+    if (marketData.liquidityUsd > 0 && marketData.liquidityUsd < config.entry.minLiquidityUsd) {
+      logger.info(
+        `[AbsorptionDetector] ⏭️ ${token.slice(0, 8)}: Liq $${marketData.liquidityUsd.toFixed(0)} < $${config.entry.minLiquidityUsd} (skipping)`
+      );
       return;
     }
 
-    if (absorptionRatio < config.absorption.minAbsorptionRatio) {
-      logger.debug(`[AbsorptionDetector] Token ${token.slice(0, 8)}: Absorption ratio too low (${(absorptionRatio * 100).toFixed(1)}% < ${config.absorption.minAbsorptionRatio * 100}%)`);
-      return;
-    }
+    // Calculate inferred sell pressure (estimate from price drop and infra buy volume)
+    const estimatedSellVolumeUsd = totalInfraBuyVolumeUsd / (config.absorption.minAbsorptionRatio || 0.3);
+    
+    // Create synthetic sell pressure event (inferred from price action)
+    const sellPressure: SellPressureEvent = {
+      token,
+      tokenSymbol: buyTx.tokenSymbol,
+      totalSellVolumeUsd: estimatedSellVolumeUsd,
+      totalSellVolumeSol: estimatedSellVolumeUsd / 100, // Estimate
+      sellTransactions: [], // We don't have actual sell txs
+      startTime: now - 300, // Assume sell happened in last 5 min
+      endTime: now - 60,
+      averagePrice: marketData.priceUsd * (1 + effectiveDrop / 100), // Price before drop
+    };
 
-    // Calculate price impact
-    const priceBeforeSell = sellPressure.sellTransactions[0].priceUsd;
-    const priceAtAbsorption = infraBuys[infraBuys.length - 1].priceUsd;
-    const priceImpactPercent = ((priceAtAbsorption - priceBeforeSell) / priceBeforeSell) * 100;
+    // Calculate absorption ratio
+    const absorptionRatio = totalInfraBuyVolumeUsd / estimatedSellVolumeUsd;
 
     // Create absorption event
     const absorptionEvent: AbsorptionEvent = {
       id: `${token}-${now}`,
       token,
-      tokenSymbol: sellPressure.tokenSymbol,
+      tokenSymbol: buyTx.tokenSymbol,
       sellPressure,
-      infraWalletBuys: infraBuys,
+      infraWalletBuys: recentInfraBuys,
       totalInfraBuyVolumeUsd,
       totalInfraBuyVolumeSol,
       absorptionRatio,
       detectedAt: now,
-      absorptionStartTime: infraBuys[0].blockTime,
-      absorptionEndTime: infraBuys[infraBuys.length - 1].blockTime,
-      absorptionDurationSec: infraBuys[infraBuys.length - 1].blockTime - infraBuys[0].blockTime,
-      priceBeforeSell,
-      priceAtAbsorption,
-      priceImpactPercent,
+      absorptionStartTime: recentInfraBuys[0].blockTime,
+      absorptionEndTime: recentInfraBuys[recentInfraBuys.length - 1].blockTime,
+      absorptionDurationSec: recentInfraBuys[recentInfraBuys.length - 1].blockTime - recentInfraBuys[0].blockTime,
+      priceBeforeSell: sellPressure.averagePrice,
+      priceAtAbsorption: marketData.priceUsd,
+      priceImpactPercent: -effectiveDrop,
       status: 'detected',
     };
 
@@ -135,69 +191,38 @@ export class AbsorptionDetector {
     this.setTokenCooldown(token);
 
     logger.info(`[AbsorptionDetector] 🎯 ABSORPTION DETECTED: ${token.slice(0, 8)}...`);
-    logger.info(`  - Sell Pressure: $${sellPressure.totalSellVolumeUsd.toFixed(2)} (${sellPressure.sellTransactions.length} txs)`);
-    logger.info(`  - Infra Absorption: $${totalInfraBuyVolumeUsd.toFixed(2)} (${infraBuys.length} buys)`);
-    logger.info(`  - Absorption Ratio: ${(absorptionRatio * 100).toFixed(1)}%`);
-    logger.info(`  - Price Impact: ${priceImpactPercent.toFixed(2)}%`);
+    logger.info(`  - Price Drop: ${effectiveDrop.toFixed(1)}%`);
+    logger.info(`  - Current Price: $${marketData.priceUsd.toFixed(6)}`);
+    logger.info(`  - Liquidity: $${marketData.liquidityUsd.toFixed(0)}`);
+    logger.info(`  - Infra Buying: ${totalInfraBuyVolumeSol.toFixed(4)} SOL (${recentInfraBuys.length} buys)`);
+    logger.info(`  - Infra Wallets: ${[...new Set(recentInfraBuys.map(tx => tx.wallet.slice(0, 8)))].join(', ')}`);
   }
 
   /**
-   * Identify sell pressure within a transaction set
+   * Check our own price history for recent drops
    */
-  private identifySellPressure(
-    transactions: Transaction[],
-    currentTime: number
-  ): SellPressureEvent | null {
-    const windowStart = currentTime - config.absorption.sellPressureWindowSec;
+  private checkRecentPriceDrop(token: string, currentPrice: number): number {
+    const history = this.priceHistory.get(token) || [];
     
-    // Get all sell transactions in the window
-    const sells = transactions.filter(
-      tx => tx.type === 'sell' && tx.blockTime >= windowStart && !this.isInfraWallet(tx.wallet)
-    );
+    // Add current price to history
+    history.push({ price: currentPrice, timestamp: Date.now() / 1000 });
+    
+    // Keep only last 30 minutes
+    const cutoff = Date.now() / 1000 - 1800;
+    const filtered = history.filter(h => h.timestamp >= cutoff);
+    this.priceHistory.set(token, filtered);
 
-    if (sells.length === 0) {
-      return null;
+    if (filtered.length < 2) {
+      return 0;
     }
 
-    const totalSellVolumeUsd = sells.reduce((sum, tx) => sum + tx.amountUsd, 0);
-    const totalSellVolumeSol = sells.reduce((sum, tx) => sum + tx.amountSol, 0);
-
-    // Check if sell pressure is significant
-    if (totalSellVolumeUsd < config.absorption.minSellVolumeUsd) {
-      return null;
-    }
-
-    const averagePrice = totalSellVolumeSol > 0 
-      ? totalSellVolumeUsd / totalSellVolumeSol 
-      : sells[0].priceUsd;
-
-    return {
-      token: sells[0].token,
-      tokenSymbol: sells[0].tokenSymbol,
-      totalSellVolumeUsd,
-      totalSellVolumeSol,
-      sellTransactions: sells,
-      startTime: sells[0].blockTime,
-      endTime: sells[sells.length - 1].blockTime,
-      averagePrice,
-    };
-  }
-
-  /**
-   * Identify infrastructure wallet buys after sell pressure
-   */
-  private identifyInfraBuys(
-    transactions: Transaction[],
-    afterTime: number,
-    beforeTime: number
-  ): Transaction[] {
-    return transactions.filter(
-      tx =>
-        tx.type === 'buy' &&
-        this.isInfraWallet(tx.wallet) &&
-        tx.blockTime >= afterTime &&
-        tx.blockTime <= beforeTime
-    );
+    // Find highest price in history
+    const highestPrice = Math.max(...filtered.map(h => h.price));
+    
+    // Calculate drop from highest
+    const dropPercent = ((highestPrice - currentPrice) / highestPrice) * 100;
+    
+    return dropPercent;
   }
 
   /**
@@ -286,6 +311,17 @@ export class AbsorptionDetector {
         now - event.detectedAt > 3600
       ) {
         this.absorptionEvents.delete(token);
+      }
+    }
+    
+    // Clean up old price history
+    const priceHistoryCutoff = now - 1800; // 30 minutes
+    for (const [token, history] of this.priceHistory) {
+      const filtered = history.filter(h => h.timestamp >= priceHistoryCutoff);
+      if (filtered.length === 0) {
+        this.priceHistory.delete(token);
+      } else {
+        this.priceHistory.set(token, filtered);
       }
     }
   }
