@@ -76,6 +76,23 @@ export const config = {
   
   // Logging
   logLevel: process.env.LOG_LEVEL || 'info',
+  
+  // Rate Limiting
+  rateLimit: {
+    // Maximum requests per second to RPC (default: 3 req/s for free tier)
+    requestsPerSecond: parseInt(process.env.RPC_REQUESTS_PER_SECOND || '3'),
+    
+    // Maximum concurrent requests
+    maxConcurrentRequests: parseInt(process.env.RPC_MAX_CONCURRENT || '2'),
+    
+    // Maximum retries for failed requests
+    maxRetries: parseInt(process.env.RPC_MAX_RETRIES || '5'),
+    
+    // Swap sampling rate: process 1 out of every N swaps (default: 20 = 5% of swaps)
+    // Lower = more swaps processed (but higher queue load)
+    // Higher = fewer swaps processed (but lower queue load)
+    swapSampleRate: parseInt(process.env.SWAP_SAMPLE_RATE || '20'),
+  },
 };
 
 // Validate required config

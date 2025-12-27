@@ -1,0 +1,29 @@
+{
+  "name": "pump-trader",
+  "version": "1.0.0",
+  "description": "Automated Pump.fun token trading bot with DexScreener analytics and Jupiter execution",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "dev": "ts-node src/main.ts",
+    "watch": "nodemon --watch src --ext ts --exec ts-node src/main.ts"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.87.6",
+    "@solana/spl-token": "^0.3.9",
+    "axios": "^1.6.2",
+    "dotenv": "^16.3.1",
+    "ws": "^8.14.2",
+    "bs58": "^5.0.0",
+    "bip39": "^3.1.0",
+    "ed25519-hd-key": "^1.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/ws": "^8.5.9",
+    "typescript": "^5.3.2",
+    "ts-node": "^10.9.1",
+    "nodemon": "^3.0.2"
+  }
+}

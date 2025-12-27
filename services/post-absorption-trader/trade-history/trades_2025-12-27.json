@@ -63,5 +63,31 @@
     "triggeredByWallet": "5eKXMMPUQBN1utwx9Vsqz5ZfGbSSAm7GL1Jzy5eexbyv",
     "status": "open",
     "isPaperTrade": false
+  },
+  {
+    "id": "So11111111111111111111111111111111111111112-1766803486049",
+    "token": "So11111111111111111111111111111111111111112",
+    "entryTime": "2025-12-27T02:44:46.049Z",
+    "entryTimestamp": 1766803486.049,
+    "entryPrice": 122.31,
+    "entryAmountSol": 0.1,
+    "entryAmountToken": 0.0817594636579184,
+    "entrySignature": "PAPER_FALLBACK_1766803486049",
+    "triggeredByWallet": "eGkFSm9YaJ92gEUssj9SRzGwkxsLrpjq6Q5YbKQ9sUf",
+    "status": "open",
+    "isPaperTrade": false
+  },
+  {
+    "id": "AbeDBXvqGnmcvX8NtQg5qgREFTw7HynkCc4u97xcpump-1766805388641",
+    "token": "AbeDBXvqGnmcvX8NtQg5qgREFTw7HynkCc4u97xcpump",
+    "entryTime": "2025-12-27T03:16:28.641Z",
+    "entryTimestamp": 1766805388.641,
+    "entryPrice": 0.0008868,
+    "entryAmountSol": 0.1,
+    "entryAmountToken": 13483335760,
+    "entrySignature": "4BiXJADRQq8ZFHE3fpTgatkh3BDxPuLbTc9FSUt14dQ1v3pDXphvrCmye6f4GtHPsdnL3vUn86jpR2qJHYHhHVQa",
+    "triggeredByWallet": "ERBVcqUW8CyLF26CpZsMzi1Fq3pB8d8q5LswRiWk7jwT",
+    "status": "open",
+    "isPaperTrade": false
   }
 ]

@@ -5,6 +5,18 @@ import { SwapTransaction, PoolState } from './types';
 import BN from 'bn.js';
 
 /**
+ * Request queue item with retry logic
+ */
+interface QueuedRequest {
+  signature: string;
+  dexType: 'raydium' | 'pumpfun' | 'pumpswap';
+  onSwap: (swap: SwapTransaction) => void;
+  retries: number;
+  resolve: (swap: SwapTransaction | null) => void;
+  reject: (error: Error) => void;
+}
+
+/**
  * SwapMonitor - Monitors DEX transactions and extracts swap data
  * Tracks Raydium AMM, PumpFun, and PumpSwap
  */
@@ -13,6 +25,21 @@ export class SwapMonitor {
   private poolStates: Map<string, PoolState>;
   private isMonitoring: boolean;
   private subscriptionIds: number[];
+  
+  // Request queue for rate limiting
+  private requestQueue: QueuedRequest[] = [];
+  private isProcessingQueue: boolean = false;
+  private readonly MAX_CONCURRENT_REQUESTS: number;
+  private REQUESTS_PER_SECOND: number; // Made mutable for adaptive rate limiting
+  private readonly INITIAL_REQUESTS_PER_SECOND: number;
+  private readonly MAX_RETRIES: number;
+  private activeRequests: number = 0;
+  private lastRequestTime: number = 0;
+  private MIN_REQUEST_INTERVAL: number; // Made mutable for adaptive rate limiting
+  private consecutive429Errors: number = 0;
+  private readonly MAX_QUEUE_SIZE = 1000; // Drop requests if queue gets too large
+  private swapSampleCounter: number = 0; // Counter for sampling swaps
+  private readonly SWAP_SAMPLE_RATE: number; // Process 1 out of every N swaps
   
   // DEX program IDs
   private readonly RAYDIUM_AMM = new PublicKey(config.dexPrograms.raydiumAMM);
@@ -27,6 +54,14 @@ export class SwapMonitor {
     this.poolStates = new Map();
     this.isMonitoring = false;
     this.subscriptionIds = [];
+    
+    // Initialize rate limiting from config
+    this.MAX_CONCURRENT_REQUESTS = config.rateLimit.maxConcurrentRequests;
+    this.INITIAL_REQUESTS_PER_SECOND = config.rateLimit.requestsPerSecond;
+    this.REQUESTS_PER_SECOND = config.rateLimit.requestsPerSecond;
+    this.MAX_RETRIES = config.rateLimit.maxRetries;
+    this.MIN_REQUEST_INTERVAL = 1000 / this.REQUESTS_PER_SECOND;
+    this.SWAP_SAMPLE_RATE = config.rateLimit.swapSampleRate;
   }
   
   /**
@@ -40,19 +75,24 @@ export class SwapMonitor {
     
     this.isMonitoring = true;
     logger.info('[SwapMonitor] Starting swap monitor...');
+    logger.info(`[SwapMonitor] Rate limiting: ${this.REQUESTS_PER_SECOND} req/s, max ${this.MAX_CONCURRENT_REQUESTS} concurrent`);
+    logger.info(`[SwapMonitor] Swap sampling: processing 1 out of every ${this.SWAP_SAMPLE_RATE} swaps (${(100/this.SWAP_SAMPLE_RATE).toFixed(1)}%)`);
+    
+    // Start queue processor
+    this.processQueue();
+    
+    // Start periodic rate limit recovery (check every 30 seconds)
+    setInterval(() => {
+      if (this.consecutive429Errors === 0 && this.requestQueue.length < 100) {
+        this.recoverRateLimit();
+      }
+    }, 30000);
     
     // Subscribe to Raydium AMM
     const raydiumSubId = this.connection.onLogs(
       this.RAYDIUM_AMM,
       async (logs) => {
-        try {
-          const swap = await this.parseRaydiumTransaction(logs.signature);
-          if (swap) {
-            onSwap(swap);
-          }
-        } catch (error) {
-          logger.error('[SwapMonitor] Error parsing Raydium tx:', error);
-        }
+        this.queueTransaction('raydium', logs.signature, onSwap);
       },
       'confirmed'
     );
@@ -63,14 +103,7 @@ export class SwapMonitor {
     const pumpFunSubId = this.connection.onLogs(
       this.PUMPFUN,
       async (logs) => {
-        try {
-          const swap = await this.parsePumpFunTransaction(logs.signature);
-          if (swap) {
-            onSwap(swap);
-          }
-        } catch (error) {
-          logger.error('[SwapMonitor] Error parsing PumpFun tx:', error);
-        }
+        this.queueTransaction('pumpfun', logs.signature, onSwap);
       },
       'confirmed'
     );
@@ -81,14 +114,7 @@ export class SwapMonitor {
     const pumpSwapSubId = this.connection.onLogs(
       this.PUMPSWAP,
       async (logs) => {
-        try {
-          const swap = await this.parsePumpSwapTransaction(logs.signature);
-          if (swap) {
-            onSwap(swap);
-          }
-        } catch (error) {
-          logger.error('[SwapMonitor] Error parsing PumpSwap tx:', error);
-        }
+        this.queueTransaction('pumpswap', logs.signature, onSwap);
       },
       'confirmed'
     );
@@ -96,6 +122,217 @@ export class SwapMonitor {
     logger.info('[SwapMonitor] Subscribed to PumpSwap');
     
     logger.info('[SwapMonitor] Monitoring started successfully');
+  }
+  
+  /**
+   * Queue a transaction for processing (rate-limited with sampling)
+   */
+  private queueTransaction(
+    dexType: 'raydium' | 'pumpfun' | 'pumpswap',
+    signature: string,
+    onSwap: (swap: SwapTransaction) => void
+  ): void {
+    // Swap sampling: only process 1 out of every SWAP_SAMPLE_RATE swaps
+    this.swapSampleCounter++;
+    if (this.swapSampleCounter % this.SWAP_SAMPLE_RATE !== 0) {
+      // Skip this swap
+      return;
+    }
+    
+    // If queue is still too large even with sampling, drop oldest requests
+    if (this.requestQueue.length >= this.MAX_QUEUE_SIZE) {
+      const dropped = this.requestQueue.splice(0, 50); // Drop oldest 50
+      logger.warn(`[SwapMonitor] Queue full (${this.requestQueue.length}), dropped ${dropped.length} old requests`);
+    }
+    
+    const request: QueuedRequest = {
+      signature,
+      dexType,
+      onSwap,
+      retries: 0,
+      resolve: () => {},
+      reject: () => {},
+    };
+    
+    this.requestQueue.push(request);
+    
+    // Log queue size periodically (less frequently now)
+    if (this.requestQueue.length % 200 === 0 && this.requestQueue.length > 0) {
+      logger.info(`[SwapMonitor] Queue size: ${this.requestQueue.length}, Active: ${this.activeRequests}, Rate: ${this.REQUESTS_PER_SECOND.toFixed(1)} req/s, Sampled: ${this.swapSampleCounter} swaps`);
+    }
+  }
+  
+  /**
+   * Process queued requests with rate limiting
+   */
+  private async processQueue(): Promise<void> {
+    if (this.isProcessingQueue) return;
+    this.isProcessingQueue = true;
+    
+    while (this.isMonitoring || this.requestQueue.length > 0) {
+      // Wait if we're at max concurrent requests
+      if (this.activeRequests >= this.MAX_CONCURRENT_REQUESTS) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+        continue;
+      }
+      
+      // Wait if we need to throttle requests (with adaptive rate limiting)
+      const now = Date.now();
+      const timeSinceLastRequest = now - this.lastRequestTime;
+      if (timeSinceLastRequest < this.MIN_REQUEST_INTERVAL) {
+        await new Promise(resolve => 
+          setTimeout(resolve, this.MIN_REQUEST_INTERVAL - timeSinceLastRequest)
+        );
+        continue;
+      }
+      
+      // Get next request from queue
+      const request = this.requestQueue.shift();
+      if (!request) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        continue;
+      }
+      
+      // Process request
+      this.activeRequests++;
+      this.lastRequestTime = Date.now();
+      this.processTransaction(request).finally(() => {
+        this.activeRequests--;
+      });
+    }
+    
+    this.isProcessingQueue = false;
+  }
+  
+  /**
+   * Adjust rate limit based on 429 errors (adaptive rate limiting)
+   */
+  private adjustRateLimit(): void {
+    this.consecutive429Errors++;
+    
+    // Reduce rate by 50% after 3 consecutive 429s, or immediately if we're still hitting errors
+    if (this.consecutive429Errors >= 3) {
+      const newRate = Math.max(0.5, this.REQUESTS_PER_SECOND * 0.5);
+      if (newRate < this.REQUESTS_PER_SECOND) {
+        this.REQUESTS_PER_SECOND = newRate;
+        this.MIN_REQUEST_INTERVAL = 1000 / this.REQUESTS_PER_SECOND;
+        logger.warn(
+          `[SwapMonitor] Rate limit reduced to ${this.REQUESTS_PER_SECOND.toFixed(1)} req/s after ${this.consecutive429Errors} consecutive 429 errors`
+        );
+        // Reset counter after reducing rate
+        this.consecutive429Errors = 0;
+      }
+    }
+  }
+  
+  /**
+   * Gradually increase rate limit back to normal when no errors
+   */
+  private recoverRateLimit(): void {
+    if (this.REQUESTS_PER_SECOND < this.INITIAL_REQUESTS_PER_SECOND) {
+      // Gradually increase rate by 10% every 30 seconds of no errors
+      const newRate = Math.min(
+        this.INITIAL_REQUESTS_PER_SECOND,
+        this.REQUESTS_PER_SECOND * 1.1
+      );
+      if (newRate > this.REQUESTS_PER_SECOND) {
+        this.REQUESTS_PER_SECOND = newRate;
+        this.MIN_REQUEST_INTERVAL = 1000 / this.REQUESTS_PER_SECOND;
+        logger.info(`[SwapMonitor] Rate limit recovering: ${this.REQUESTS_PER_SECOND.toFixed(1)} req/s`);
+      }
+    }
+  }
+  
+  /**
+   * Process a single transaction with retry logic
+   */
+  private async processTransaction(request: QueuedRequest): Promise<void> {
+    try {
+      const swap = await this.fetchTransactionWithRetry(request);
+      if (swap) {
+        request.onSwap(swap);
+      }
+      request.resolve(swap);
+    } catch (error) {
+      if (request.retries < this.MAX_RETRIES) {
+        // Re-queue for retry
+        request.retries++;
+        const backoffDelay = Math.min(500 * Math.pow(2, request.retries - 1), 5000);
+        setTimeout(() => {
+          this.requestQueue.push(request);
+        }, backoffDelay);
+      } else {
+        logger.error(`[SwapMonitor] Failed to process transaction after ${this.MAX_RETRIES} retries: ${request.signature}`);
+        request.reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    }
+  }
+  
+  /**
+   * Fetch transaction with retry and exponential backoff
+   */
+  private async fetchTransactionWithRetry(request: QueuedRequest): Promise<SwapTransaction | null> {
+    let lastError: Error | null = null;
+    let hadRateLimitError = false;
+    
+    for (let attempt = 0; attempt <= this.MAX_RETRIES; attempt++) {
+      try {
+        let swap: SwapTransaction | null = null;
+        
+        switch (request.dexType) {
+          case 'raydium':
+            swap = await this.parseRaydiumTransaction(request.signature);
+            break;
+          case 'pumpfun':
+            swap = await this.parsePumpFunTransaction(request.signature);
+            break;
+          case 'pumpswap':
+            swap = await this.parsePumpSwapTransaction(request.signature);
+            break;
+        }
+        
+        // Success - reset error counter if we had rate limit errors
+        if (hadRateLimitError) {
+          this.consecutive429Errors = 0;
+          this.recoverRateLimit();
+        }
+        
+        return swap;
+      } catch (error: any) {
+        lastError = error;
+        
+        // Check if it's a rate limit error
+        const isRateLimit = 
+          error?.message?.includes('429') ||
+          error?.message?.includes('Too Many Requests') ||
+          error?.message?.includes('rate limit') ||
+          error?.message?.includes('rate limited') ||
+          error?.code === 429 ||
+          error?.code === -32429;
+        
+        if (isRateLimit) {
+          hadRateLimitError = true;
+          this.adjustRateLimit();
+          
+          if (attempt < this.MAX_RETRIES) {
+            // Exponential backoff: 1s, 2s, 4s, 8s, 10s
+            const backoffDelay = Math.min(1000 * Math.pow(2, attempt), 10000);
+            logger.warn(
+              `[SwapMonitor] Rate limited, retrying after ${backoffDelay}ms (attempt ${attempt + 1}/${this.MAX_RETRIES}), current rate: ${this.REQUESTS_PER_SECOND.toFixed(1)} req/s`
+            );
+            await new Promise(resolve => setTimeout(resolve, backoffDelay));
+            continue;
+          }
+        }
+        
+        // For non-rate-limit errors, throw immediately
+        if (!isRateLimit) {
+          throw error;
+        }
+      }
+    }
+    
+    throw lastError || new Error('Failed to fetch transaction');
   }
   
   /**
@@ -109,6 +346,17 @@ export class SwapMonitor {
       await this.connection.removeOnLogsListener(subId);
     }
     this.subscriptionIds = [];
+    
+    // Wait for queue to drain (with timeout)
+    const maxWaitTime = 30000; // 30 seconds
+    const startTime = Date.now();
+    while (this.requestQueue.length > 0 || this.activeRequests > 0) {
+      if (Date.now() - startTime > maxWaitTime) {
+        logger.warn('[SwapMonitor] Queue drain timeout, stopping anyway');
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
     
     logger.info('[SwapMonitor] Monitor stopped');
   }

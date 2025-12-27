@@ -1,0 +1,19 @@
+{
+  "generatedAt": "2025-12-27T04:03:37.980Z",
+  "systemStats": {
+    "monitoringStartTime": 1766808157940,
+    "totalSwapsProcessed": 30,
+    "totalLargeSellEvents": 0,
+    "totalCandidatesIdentified": 0,
+    "totalWalletsTracked": 0,
+    "confirmedInfraWallets": 0,
+    "defensiveInfraCount": 0,
+    "aggressiveInfraCount": 0,
+    "cyclicalCount": 0,
+    "opportunisticCount": 0,
+    "noiseCount": 0,
+    "avgProcessingTimeMs": 0.018867680126765367,
+    "lastSaveTime": 0
+  },
+  "infraWallets": []
+}

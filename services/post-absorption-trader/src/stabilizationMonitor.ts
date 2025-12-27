@@ -28,13 +28,16 @@ export class StabilizationMonitor {
   
   // Track market data
   private marketData: Map<string, MarketData> = new Map();
+  
+  // Track large sells during stabilization (new)
+  private largeSells: Map<string, Array<{ timestamp: number; amountSol: number }>> = new Map();
 
   constructor(volumeAnalyzer: VolumeAnalyzer) {
     this.marketDataService = new MarketDataService();
     this.volumeAnalyzer = volumeAnalyzer;
     
-    // Monitor prices periodically
-    setInterval(() => this.updatePrices(), 15000); // Every 15 seconds for faster samples
+    // Monitor prices periodically - TIGHTENED to 10 seconds (from 15s)
+    setInterval(() => this.updatePrices(), 10000); // Every 10 seconds
   }
 
   /**
@@ -136,6 +139,28 @@ export class StabilizationMonitor {
     } else {
       failedChecks.push(`Heavy selling (buy/sell: ${volumeRatio.toFixed(2)})`);
     }
+    
+    // NEW Check 6: Higher lows pattern (confirms uptrend)
+    const higherLowsCount = this.countHigherLows(prices);
+    if (higherLowsCount >= 2) {
+      passedChecks.push(`Higher lows detected (${higherLowsCount})`);
+    } else {
+      failedChecks.push(`No higher lows pattern (${higherLowsCount} < 2)`);
+    }
+    
+    // NEW Check 7: No large sells during window
+    const largeSells = this.largeSells.get(token) || [];
+    const recentLargeSells = largeSells.filter(s => {
+      const now = Date.now() / 1000;
+      return (now - s.timestamp) < config.stabilization.monitorDurationSec;
+    });
+    
+    if (recentLargeSells.length === 0) {
+      passedChecks.push('No large sells during stabilization');
+    } else {
+      const totalSellAmount = recentLargeSells.reduce((sum, s) => sum + s.amountSol, 0);
+      failedChecks.push(`${recentLargeSells.length} large sells (${totalSellAmount.toFixed(2)} SOL)`);
+    }
 
     // Calculate stability score (0-100)
     const score = (passedChecks.length / (passedChecks.length + failedChecks.length)) * 100;
@@ -211,6 +236,55 @@ export class StabilizationMonitor {
     
     return (stdDev / mean) * 100; // As percentage
   }
+  
+  /**
+   * Count higher lows in price samples (confirms uptrend)
+   * NEW: Added for stronger stabilization confirmation
+   */
+  private countHigherLows(prices: number[]): number {
+    if (prices.length < 3) {
+      return 0;
+    }
+    
+    let higherLows = 0;
+    let previousLow = prices[0];
+    
+    // Find local lows and check if they're higher than previous
+    for (let i = 1; i < prices.length - 1; i++) {
+      const isLocalLow = prices[i] <= prices[i - 1] && prices[i] <= prices[i + 1];
+      
+      if (isLocalLow) {
+        if (prices[i] > previousLow) {
+          higherLows++;
+        }
+        previousLow = prices[i];
+      }
+    }
+    
+    return higherLows;
+  }
+  
+  /**
+   * Record a large sell transaction (called externally by listener)
+   * NEW: Tracks large sells during stabilization period
+   */
+  recordLargeSell(token: string, amountSol: number): void {
+    const sells = this.largeSells.get(token) || [];
+    sells.push({
+      timestamp: Date.now() / 1000,
+      amountSol,
+    });
+    
+    // Keep only recent sells (last 30 minutes)
+    const now = Date.now() / 1000;
+    const filtered = sells.filter(s => now - s.timestamp < 1800);
+    this.largeSells.set(token, filtered);
+    
+    logger.warn(
+      `[StabilizationMonitor] 🚨 Large sell detected: ${token.slice(0, 8)}... ` +
+      `${amountSol.toFixed(2)} SOL`
+    );
+  }
 
   /**
    * Analyze recent volume (buy vs sell)
@@ -282,6 +356,7 @@ export class StabilizationMonitor {
   stopMonitoring(token: string): void {
     this.priceSamples.delete(token);
     this.marketData.delete(token);
+    this.largeSells.delete(token); // NEW: Clear large sells tracking
     logger.info(`[StabilizationMonitor] Stopped monitoring ${token.slice(0, 8)}...`);
   }
 

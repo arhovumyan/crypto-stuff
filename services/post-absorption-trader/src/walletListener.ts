@@ -225,14 +225,30 @@ export class WalletListener {
         `Largest transfer: ${largestTransfer.toFixed(4)} SOL`
       );
 
-      // Find token balance changes for this wallet
-      let foundTokenChange = false;
+      // CRITICAL LOGIC: In Pump.fun swaps, there are TWO token balance changes:
+      // 1. The actual token being traded (e.g., NOMORE67)
+      // 2. WSOL (wrapped SOL) - the medium of exchange
+      // 
+      // When infra wallet SELLS token for WSOL:
+      //   - Token balance goes DOWN (sell)
+      //   - WSOL balance goes UP (receive)
+      //   → We should track this token with the WSOL value
+      // 
+      // When infra wallet BUYS token with WSOL:
+      //   - Token balance goes UP (buy)
+      //   - WSOL balance goes DOWN (spend)
+      //   → We should also track this token with the WSOL value
+      
+      const WSOL_MINT = 'So11111111111111111111111111111111111111112';
+      
+      let tokenChange: any = null;
+      let wsolChange: number = 0;
       let checkedAccounts = 0;
       
+      // First pass: collect both token and WSOL changes
       for (let i = 0; i < preTokenBalances.length; i++) {
         const preBal = preTokenBalances[i];
         
-        // Check if this token account belongs to our wallet
         if (preBal.owner !== walletAddress) {
           continue;
         }
@@ -246,65 +262,68 @@ export class WalletListener {
         if (!postBal) {
           continue;
         }
-        
-        foundTokenChange = true;
 
         const preAmount = preBal.uiTokenAmount.uiAmount || 0;
         const postAmount = postBal.uiTokenAmount.uiAmount || 0;
         const change = postAmount - preAmount;
 
         if (Math.abs(change) < 0.000001) {
-          continue; // No significant change
+          continue;
         }
 
         const token = preBal.mint;
-        const type = change > 0 ? 'buy' : 'sell';
-
-        // CRITICAL FIX: WSOL is a token, not native SOL!
-        // WSOL token address: So11111111111111111111111111111111111111112
-        const WSOL_MINT = 'So11111111111111111111111111111111111111112';
-        
-        let tradeValueSol: number;
         
         if (token === WSOL_MINT) {
-          // This is WSOL - use the token balance change directly as SOL amount
-          tradeValueSol = Math.abs(change);
+          // Track WSOL change (this is the trade value)
+          wsolChange = change;
           logger.info(
-            `[WalletListener] 💡 ${sig} - ${type.toUpperCase()} WSOL: ` +
-            `Token: ${token}, Trade value: ${tradeValueSol.toFixed(4)} SOL (from WSOL balance)`
+            `[WalletListener] 💰 ${sig} - WSOL change: ${change > 0 ? '+' : ''}${change.toFixed(4)} WSOL`
           );
         } else {
-          // Regular token - use native SOL balance change
-          tradeValueSol = largestTransfer;
+          // This is the actual token being traded
+          tokenChange = {
+            mint: token,
+            change: change,
+            type: change > 0 ? 'buy' : 'sell',
+            amountToken: Math.abs(change),
+          };
           logger.info(
-            `[WalletListener] 💡 ${sig} - ${type.toUpperCase()}: ` +
-            `Token: ${token}, Trade value: ${tradeValueSol.toFixed(4)} SOL (from SOL balance)`
+            `[WalletListener] 🪙 ${sig} - Token change: ${token.slice(0, 8)}... ${change > 0 ? '+' : ''}${change.toFixed(6)}`
           );
         }
+      }
+      
+      // If we have both token and WSOL changes, this is a swap we want to track
+      if (tokenChange && Math.abs(wsolChange) > 0) {
+        const tradeValueSol = Math.abs(wsolChange);
         
-        // Skip if trade value is too small (likely just fees or non-swap transactions)
-        // Minimum 0.1 SOL for real trades (now that we detect WSOL correctly)
+        // Check minimum trade value
         if (tradeValueSol < 0.1) {
-          logger.info(`[WalletListener] ⏭️  ${sig} - Below minimum: ${tradeValueSol.toFixed(4)} SOL < 0.1 SOL`);
-          continue;
+          logger.info(
+            `[WalletListener] ⏭️  ${sig} - Below minimum: ${tradeValueSol.toFixed(4)} SOL < 0.1 SOL`
+          );
+          return null;
         }
         
-        // Don't convert to USD - use SOL values directly
-        // Keep amountUsd for compatibility but don't use it for thresholds
-        const amountUsd = tradeValueSol * 100; // Rough estimate, not used for decisions
-
+        logger.info(
+          `[WalletListener] ✅ ${sig} - Valid swap detected: ` +
+          `${tokenChange.type.toUpperCase()} ${tokenChange.mint.slice(0, 8)}... for ${tradeValueSol.toFixed(4)} SOL`
+        );
+        
+        const amountUsd = tradeValueSol * 100; // Rough estimate
+        
         return {
           signature: tx.transaction.signatures[0],
           blockTime: tx.blockTime,
           slot: tx.slot,
           wallet: walletAddress,
-          token,
-          type,
-          amountToken: Math.abs(change),
+          token: tokenChange.mint,
+          type: tokenChange.type,
+          amountToken: tokenChange.amountToken,
           amountSol: tradeValueSol,
           amountUsd,
-          price: tradeValueSol / Math.abs(change),
-          priceUsd: amountUsd / Math.abs(change),
+          price: tradeValueSol / tokenChange.amountToken,
+          priceUsd: amountUsd / tokenChange.amountToken,
         };
       }
 
@@ -314,10 +333,17 @@ export class WalletListener {
           `[WalletListener] ❌ ${sig} - No token accounts owned by wallet ` +
           `(${preTokenBalances.length} token accounts in tx, but none owned by ${walletAddress})`
         );
-      } else if (foundTokenChange) {
+      } else if (tokenChange && Math.abs(wsolChange) === 0) {
         logger.info(
-          `[WalletListener] ❌ ${sig} - Found ${checkedAccounts} token account(s) but trade below minimum ` +
-          `(SOL change: ${Math.abs(solChange).toFixed(6)}, threshold: 0.1)`
+          `[WalletListener] ❌ ${sig} - Token change without WSOL change (not a swap)`
+        );
+      } else if (!tokenChange && Math.abs(wsolChange) > 0) {
+        logger.info(
+          `[WalletListener] ❌ ${sig} - WSOL-only transaction (no other token involved)`
+        );
+      } else {
+        logger.info(
+          `[WalletListener] ❌ ${sig} - Found ${checkedAccounts} token account(s) but no valid swap detected`
         );
       }
 
