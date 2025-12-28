@@ -1,0 +1,27 @@
+{
+  "name": "solana-auto-trader",
+  "version": "1.0.0",
+  "description": "Automated Solana trading system with token discovery, validation, and execution",
+  "main": "index.js",
+  "scripts": {
+    "discovery": "cd service1-discovery && npx ts-node index.ts",
+    "validator": "cd service2-validator && npx ts-node index.ts",
+    "executor": "cd service3-executor && npx ts-node index.ts",
+    "install-all": "npm install && cd service1-discovery && npm install && cd ../service2-validator && npm install && cd ../service3-executor && npm install"
+  },
+  "keywords": ["solana", "trading", "crypto", "automation"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@solana/web3.js": "^1.87.6",
+    "axios": "^1.6.2",
+    "mongodb": "^6.3.0",
+    "bs58": "^5.0.0",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "typescript": "^5.3.3",
+    "ts-node": "^10.9.2"
+  }
+}

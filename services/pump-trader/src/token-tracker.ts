@@ -65,20 +65,7 @@ export class TokenTracker {
 
     this.totalTokensDetected++;
 
-    // Fetch metadata immediately (async, don't wait)
-    this.dexScreener.getTokenMetadata(mint).then(metadata => {
-      if (metadata) {
-        Logger.newTokenDetected(mint, signature, metadata);
-      } else {
-        Logger.newTokenDetected(mint, signature);
-      }
-    }).catch(() => {
-      Logger.newTokenDetected(mint, signature);
-    });
-
-    // Log without metadata first
-    Logger.newTokenDetected(mint, signature);
-
+    // Create initial token record
     const token: TrackedToken = {
       mint,
       discoveredAt: new Date(),

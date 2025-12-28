@@ -1,0 +1,31 @@
+{
+  "scraped_at": "2025-12-27T14:53:51.612683",
+  "filters": {
+    "min_market_cap": 20000,
+    "max_market_cap": 1000000
+  },
+  "total_tokens": 3,
+  "tokens": [
+    {
+      "address": "a3W4qutoEJA4232T2gwZUfgYJTetr96pU4SJMwppump",
+      "scraped_at": "2025-12-27T14:49:55.345578",
+      "top_liquidity_holder": null,
+      "liquidity_holder_address": null,
+      "liquidity_percentage": null
+    },
+    {
+      "address": "Gbu7JAKhTVtGyRryg8cYPiKNhonXpUqbrZuCDjfUpump",
+      "scraped_at": "2025-12-27T14:52:38.715967",
+      "top_liquidity_holder": null,
+      "liquidity_holder_address": null,
+      "liquidity_percentage": null
+    },
+    {
+      "address": "2anPRC6DasQmoun5WehqQe1YgcqYMBcCpi1ZKiQwpump",
+      "scraped_at": "2025-12-27T14:53:48.186200",
+      "top_liquidity_holder": null,
+      "liquidity_holder_address": null,
+      "liquidity_percentage": null
+    }
+  ]
+}

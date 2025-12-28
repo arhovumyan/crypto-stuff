@@ -1,0 +1,32 @@
+{
+  "name": "@copytrader/auto-sniper",
+  "version": "1.0.0",
+  "description": "Automated Solana token sniper - 3 service architecture",
+  "type": "module",
+  "scripts": {
+    "service1": "node --import tsx src/service1-token-discovery-aggressive.ts",
+    "service1-geyser": "node --import tsx src/service1-token-discovery-geyser.ts",
+    "service2": "node --import tsx src/service2-token-evaluation.ts",
+    "service3": "node --import tsx src/service3-trade-execution.ts",
+    "demo": "node --import tsx src/demo-add-tokens.ts",
+    "monitor": "./monitor.sh",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@jup-ag/api": "^6.0.47",
+    "@solana/spl-token": "^0.4.14",
+    "@solana/web3.js": "^1.87.6",
+    "@triton-one/yellowstone-grpc": "^0.4.0",
+    "axios": "^1.13.2",
+    "bip39": "^3.1.0",
+    "bs58": "^5.0.0",
+    "dotenv": "^16.3.1",
+    "ed25519-hd-key": "^1.3.0",
+    "mongodb": "^6.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.27",
+    "tsx": "^4.21.0",
+    "typescript": "^5.3.3"
+  }
+}

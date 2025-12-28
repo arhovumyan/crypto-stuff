@@ -6,12 +6,14 @@
 import { config } from './config';
 import { Logger } from './logger';
 import { PumpfunDiscovery, TokenCreationEvent } from './discovery';
+import { TokenPoller, NewToken } from './token-poller';
 import { TokenTracker, TrackedToken } from './token-tracker';
 import { JupiterExecutor } from './jupiter-executor';
 import { PositionManager } from './position-manager';
 
 class PumpTraderBot {
   private discovery: PumpfunDiscovery;
+  private poller: TokenPoller;
   private tracker: TokenTracker;
   private executor: JupiterExecutor;
   private positionManager: PositionManager;
@@ -19,6 +21,7 @@ class PumpTraderBot {
 
   constructor() {
     this.discovery = new PumpfunDiscovery();
+    this.poller = new TokenPoller();
     this.tracker = new TokenTracker();
     this.executor = new JupiterExecutor();
     this.positionManager = new PositionManager(this.executor);
@@ -47,11 +50,45 @@ class PumpTraderBot {
     // Set up token tracker callback
     this.tracker.onReadyToBuy = (token) => this.handleReadyToBuy(token);
 
-    // Start discovery
+    // Start active polling for new tokens (primary method)
+    await this.poller.start((token) => this.handlePolledToken(token));
+
+    // Also start WebSocket discovery as backup
     await this.discovery.start((event) => this.handleTokenCreation(event));
 
     // Set up graceful shutdown
     this.setupShutdownHandlers();
+  }
+
+  /**
+   * Handle token discovered by polling
+   */
+  private async handlePolledToken(token: NewToken): Promise<void> {
+    try {
+      // Log the token immediately with all details
+      console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log(`🆕 NEW TOKEN DETECTED (${token.source})`);
+      console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+      console.log(`📛 Name:       ${token.name}`);
+      console.log(`🎫 Ticker:     ${token.symbol}`);
+      console.log(`📍 Address:    ${token.mint}`);
+      console.log(`🔗 Solscan:    https://solscan.io/token/${token.mint}`);
+      console.log(`⏰ Created:    ${token.pairCreatedAt.toISOString()}`);
+      
+      if (token.marketCap) {
+        console.log(`💵 Market Cap: $${token.marketCap.toLocaleString()}`);
+      }
+      if (token.liquidity) {
+        console.log(`💧 Liquidity:  $${token.liquidity.toLocaleString()}`);
+      }
+      
+      console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
+      
+      // Now pass to tracker for evaluation
+      await this.tracker.discoverToken(token.mint, `polled-${Date.now()}`);
+    } catch (error: any) {
+      Logger.error(`Error handling polled token ${token.mint}`, error);
+    }
   }
 
   /**
@@ -108,11 +145,18 @@ class PumpTraderBot {
       Logger.systemShutdown();
       this.isRunning = false;
 
+      // Stop polling
+      this.poller.stop();
+
       // Stop discovery
       this.discovery.stop();
 
       // Stop position monitoring
       this.positionManager.stopMonitoring();
+
+      // Log final stats
+      const pollerStats = this.poller.getStats();
+      console.log(`\n📊 Total tokens seen: ${pollerStats.totalSeen}`);
 
       // Log final state
       const positions = this.positionManager.getPositions();
