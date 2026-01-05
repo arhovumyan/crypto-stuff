@@ -1,0 +1,42 @@
+{
+  "name": "wallet-analyzer",
+  "version": "1.0.0",
+  "description": "Comprehensive Solana wallet behavior analysis system to reverse-engineer profitable trading strategies",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "analyze": "ts-node src/cli.ts analyze",
+    "report": "ts-node src/cli.ts report",
+    "compare": "ts-node src/cli.ts compare",
+    "test": "jest",
+    "lint": "eslint src --ext .ts",
+    "setup-db": "psql $DATABASE_URL -f ../../database/wallet-analyzer-schema.sql"
+  },
+  "keywords": ["solana", "trading", "analysis", "blockchain", "crypto"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@solana/web3.js": "^1.87.6",
+    "axios": "^1.6.5",
+    "pg": "^8.11.3",
+    "dotenv": "^16.3.1",
+    "decimal.js": "^10.4.3",
+    "date-fns": "^2.30.0",
+    "commander": "^11.1.0",
+    "chalk": "^4.1.2",
+    "ora": "^5.4.1",
+    "table": "^6.8.1",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.6",
+    "@types/pg": "^8.10.9",
+    "typescript": "^5.3.3",
+    "ts-node": "^10.9.2",
+    "@typescript-eslint/eslint-plugin": "^6.17.0",
+    "@typescript-eslint/parser": "^6.17.0",
+    "eslint": "^8.56.0"
+  }
+}

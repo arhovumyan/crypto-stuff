@@ -136,11 +136,7 @@ CREATE INDEX idx_risk_events_created_at ON risk_events(created_at DESC);
 
 -- Seed followed wallets from your .env
 INSERT INTO followed_wallets (address) VALUES
-  ('BiiduLCkxxkXfBZzrQeikgCqbeednby7rzoVteuioHJM'),
-  ('5aLY85pyxiuX3fd4RgM3Yc1e3MAL6b7UgaZz6MS3JUfG'),
-  ('2pDhRxLSGriCnFBY4BH5YFJXUFfE1R1ZnCCdP8iMGpxk'),
-  ('79P5UPYtt4Tnw3dsmoTNirPF168KExHfnZsy1HyfKzti'),
-  ('5TjCevDrEwCUchRo5tjJu2bS6VpTh3oP3neSTizkQdS7')
+  ('ERBVcqUW8CyLF26CpZsMzi1Fq3pB8d8q5LswRiWk7jwT')
 ON CONFLICT (address) DO NOTHING;
 
 -- Create updated_at trigger function

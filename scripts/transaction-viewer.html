@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Activities - Transaction History</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #e0e0e0;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: rgba(22, 33, 62, 0.8);
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+            backdrop-filter: blur(10px);
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 30px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            font-weight: 600;
+            color: white;
+        }
+
+        .header .controls {
+            display: flex;
+            gap: 15px;
+        }
+
+        .header button {
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        .header button:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            padding: 30px 40px;
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
+            border: 1px solid rgba(102, 126, 234, 0.3);
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .stat-card .label {
+            font-size: 12px;
+            color: #a0a0a0;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+        }
+
+        .stat-card .value {
+            font-size: 28px;
+            font-weight: 700;
+            color: white;
+        }
+
+        .filters {
+            padding: 20px 40px;
+            background: rgba(0, 0, 0, 0.1);
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .filters input,
+        .filters select {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .filters input::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .table-container {
+            overflow-x: auto;
+            padding: 0 40px 40px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead {
+            background: rgba(102, 126, 234, 0.1);
+            position: sticky;
+            top: 0;
+        }
+
+        th {
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #a0a0a0;
+            border-bottom: 2px solid rgba(102, 126, 234, 0.3);
+        }
+
+        tbody tr {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            transition: all 0.2s ease;
+        }
+
+        tbody tr:hover {
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        td {
+            padding: 15px;
+            font-size: 14px;
+        }
+
+        .time {
+            color: #9ca3af;
+            font-weight: 500;
+        }
+
+        .value {
+            font-weight: 600;
+            color: #10b981;
+        }
+
+        .amount {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .token {
+            background: rgba(102, 126, 234, 0.2);
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #a5b4fc;
+        }
+
+        .arrow {
+            color: #667eea;
+            font-size: 16px;
+        }
+
+        .tx-hash {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: #60a5fa;
+            cursor: pointer;
+        }
+
+        .tx-hash:hover {
+            text-decoration: underline;
+        }
+
+        .status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .status.success {
+            background: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+        }
+
+        .status.failed {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px;
+            color: #a0a0a0;
+        }
+
+        .spinner {
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>💎 TRADING ACTIVITIES</h1>
+            <div class="controls">
+                <input type="file" id="csvFile" accept=".csv" style="display: none;">
+                <button onclick="document.getElementById('csvFile').click()">📁 Load CSV</button>
+                <button onclick="exportData()">💾 Download CSV</button>
+                <button onclick="location.reload()">🔄 Refresh</button>
+            </div>
+        </div>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="label">Total Transactions</div>
+                <div class="value" id="totalTx">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Successful</div>
+                <div class="value" id="successTx">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Failed</div>
+                <div class="value" id="failedTx">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Total Value</div>
+                <div class="value" id="totalValue">$0.00</div>
+            </div>
+        </div>
+
+        <div class="filters">
+            <input type="text" id="searchToken" placeholder="🔍 Search token..." onkeyup="filterTable()">
+            <select id="statusFilter" onchange="filterTable()">
+                <option value="">All Status</option>
+                <option value="Success">Success</option>
+                <option value="Failed">Failed</option>
+            </select>
+            <input type="number" id="minValue" placeholder="Min Value ($)" onkeyup="filterTable()">
+        </div>
+
+        <div class="table-container">
+            <table id="transactionTable">
+                <thead>
+                    <tr>
+                        <th>TIME</th>
+                        <th>VALUE</th>
+                        <th>AMOUNT</th>
+                        <th>TRANSACTION HASH</th>
+                        <th>STATUS</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody">
+                    <tr>
+                        <td colspan="5">
+                            <div class="loading">
+                                <div class="spinner"></div>
+                                <p>Load a CSV file to view transactions</p>
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        let transactions = [];
+        let filteredTransactions = [];
+
+        // Load CSV file
+        document.getElementById('csvFile').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    parseCSV(event.target.result);
+                };
+                reader.readAsText(file);
+            }
+        });
+
+        function parseCSV(csv) {
+            const lines = csv.split('\n');
+            transactions = [];
+            
+            for (let i = 1; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line) continue;
+                
+                const parts = line.split(',');
+                if (parts.length >= 8) {
+                    transactions.push({
+                        time: parts[0],
+                        value: parts[1],
+                        amountFrom: parts[2].replace(/"/g, ''),
+                        tokenFrom: parts[3],
+                        amountTo: parts[4].replace(/"/g, ''),
+                        tokenTo: parts[5],
+                        txHash: parts[6],
+                        status: parts[7]
+                    });
+                }
+            }
+            
+            filteredTransactions = [...transactions];
+            updateStats();
+            renderTable();
+        }
+
+        function updateStats() {
+            document.getElementById('totalTx').textContent = transactions.length.toLocaleString();
+            
+            const successful = transactions.filter(tx => tx.status === 'Success').length;
+            const failed = transactions.filter(tx => tx.status === 'Failed').length;
+            
+            document.getElementById('successTx').textContent = successful.toLocaleString();
+            document.getElementById('failedTx').textContent = failed.toLocaleString();
+            
+            const totalValue = transactions.reduce((sum, tx) => {
+                const value = parseFloat(tx.value.replace('$', ''));
+                return sum + (isNaN(value) ? 0 : value);
+            }, 0);
+            
+            document.getElementById('totalValue').textContent = '$' + totalValue.toFixed(2);
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('tableBody');
+            tbody.innerHTML = '';
+            
+            if (filteredTransactions.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5"><div class="loading"><p>No transactions found</p></div></td></tr>';
+                return;
+            }
+            
+            filteredTransactions.forEach(tx => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="time">${tx.time}</td>
+                    <td class="value">${tx.value}</td>
+                    <td>
+                        <div class="amount">
+                            <span>${tx.amountFrom}</span>
+                            <span class="token">${tx.tokenFrom}</span>
+                            <span class="arrow">→</span>
+                            <span>${tx.amountTo}</span>
+                            <span class="token">${tx.tokenTo}</span>
+                        </div>
+                    </td>
+                    <td class="tx-hash" onclick="window.open('https://solscan.io/tx/${tx.txHash}', '_blank')">${tx.txHash.substring(0, 16)}...</td>
+                    <td><span class="status ${tx.status.toLowerCase()}">${tx.status}</span></td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function filterTable() {
+            const searchToken = document.getElementById('searchToken').value.toLowerCase();
+            const statusFilter = document.getElementById('statusFilter').value;
+            const minValue = parseFloat(document.getElementById('minValue').value) || 0;
+            
+            filteredTransactions = transactions.filter(tx => {
+                const matchToken = searchToken === '' || 
+                    tx.tokenFrom.toLowerCase().includes(searchToken) || 
+                    tx.tokenTo.toLowerCase().includes(searchToken);
+                
+                const matchStatus = statusFilter === '' || tx.status === statusFilter;
+                
+                const value = parseFloat(tx.value.replace('$', ''));
+                const matchValue = value >= minValue;
+                
+                return matchToken && matchStatus && matchValue;
+            });
+            
+            renderTable();
+        }
+
+        function exportData() {
+            let csv = 'Time,Value,Amount From,Token From,Amount To,Token To,Transaction Hash,Status\n';
+            filteredTransactions.forEach(tx => {
+                csv += `${tx.time},${tx.value},"${tx.amountFrom}",${tx.tokenFrom},"${tx.amountTo}",${tx.tokenTo},${tx.txHash},${tx.status}\n`;
+            });
+            
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `transactions_${Date.now()}.csv`;
+            a.click();
+        }
+
+        // Auto-load if there's a CSV file in the same directory
+        window.addEventListener('DOMContentLoaded', function() {
+            // Try to load a default CSV file
+            fetch('transactions_ERBVcqUW_2026-01-04.csv')
+                .then(response => response.text())
+                .then(csv => parseCSV(csv))
+                .catch(err => console.log('No default CSV found'));
+        });
+    </script>
+</body>
+</html>
