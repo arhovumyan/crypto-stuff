@@ -91,58 +91,38 @@ export class TradeRecorder {
   }
 
   /**
-   * Get all followed wallets from database AND .env file
+   * Get all followed wallets from .env file ONLY (not from database)
    */
   async getFollowedWallets(): Promise<string[]> {
-    try {
-      // Get wallets from database
-      const result = await query<{ address: string }>(
-        `SELECT address FROM followed_wallets WHERE enabled = true`
-      );
-      const dbWallets = result.rows.map((row) => row.address);
-      
-      // Get wallets from .env LEADER_WALLET_* variables
-      const envWallets: string[] = [];
-      for (let i = 1; i <= 20; i++) {
-        const wallet = process.env[`LEADER_WALLET_${i}`];
-        if (wallet && wallet.trim().length > 0) {
-          envWallets.push(wallet.trim());
-        }
+    // Get wallets from .env LEADER_WALLET_* variables ONLY
+    const envWallets: string[] = [];
+    for (let i = 1; i <= 20; i++) {
+      const wallet = process.env[`LEADER_WALLET_${i}`];
+      if (wallet && wallet.trim().length > 0) {
+        envWallets.push(wallet.trim());
       }
-      
-      // Also check WATCH_ADDRESSES for backward compatibility
-      const watchAddresses = process.env.WATCH_ADDRESSES || '';
-      if (watchAddresses) {
-        const watchWallets = watchAddresses
-          .split(',')
-          .map(addr => addr.trim())
-          .filter(addr => addr.length > 0);
-        envWallets.push(...watchWallets);
-      }
-      
-      // Combine and deduplicate
-      const allWallets = [...new Set([...dbWallets, ...envWallets])];
-      
-      if (allWallets.length > 0) {
-        logger.info(`Monitoring ${allWallets.length} wallet(s) (${dbWallets.length} from DB, ${envWallets.length} from .env)`);
-      }
-      
-      return allWallets;
-    } catch (error) {
-      logger.error({ error }, 'Failed to fetch followed wallets');
-      
-      // Fallback to .env only if database fails
-      const envWallets: string[] = [];
-      for (let i = 1; i <= 20; i++) {
-        const wallet = process.env[`LEADER_WALLET_${i}`];
-        if (wallet && wallet.trim().length > 0) {
-          envWallets.push(wallet.trim());
-        }
-      }
-      
-      logger.warn(`Using ${envWallets.length} wallet(s) from .env only (database error)`);
-      return envWallets;
     }
+    
+    // Also check WATCH_ADDRESSES for backward compatibility
+    const watchAddresses = process.env.WATCH_ADDRESSES || '';
+    if (watchAddresses) {
+      const watchWallets = watchAddresses
+        .split(',')
+        .map(addr => addr.trim())
+        .filter(addr => addr.length > 0);
+      envWallets.push(...watchWallets);
+    }
+    
+    // Deduplicate
+    const uniqueWallets = [...new Set(envWallets)];
+    
+    if (uniqueWallets.length > 0) {
+      logger.info(`Monitoring ${uniqueWallets.length} wallet(s) from .env`);
+    } else {
+      logger.warn('No wallets found in .env (LEADER_WALLET_* or WATCH_ADDRESSES)');
+    }
+    
+    return uniqueWallets;
   }
 
   /**

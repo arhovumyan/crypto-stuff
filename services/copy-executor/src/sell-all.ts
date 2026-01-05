@@ -4,7 +4,7 @@
  */
 
 import { Connection, LAMPORTS_PER_SOL, Keypair, PublicKey } from '@solana/web3.js';
-import { getAccount, getAssociatedTokenAddress, TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import * as bip39 from 'bip39';
 import { derivePath } from 'ed25519-hd-key';
 import axios from 'axios';

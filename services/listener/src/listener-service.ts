@@ -20,6 +20,7 @@ export class ListenerService {
   private parser: TransactionParser;
   private recorder: TradeRecorder;
   private isRunning = false;
+  private serviceStartTime: number; // Track when service started to ignore old transactions
 
   constructor() {
     this.wsManager = new WebSocketManager(config.HELIUS_WS_URL);
@@ -29,6 +30,7 @@ export class ListenerService {
     });
     this.parser = new TransactionParser(this.connection);
     this.recorder = new TradeRecorder();
+    this.serviceStartTime = Date.now() / 1000; // Unix timestamp in seconds
   }
 
   async start(): Promise<void> {
@@ -110,6 +112,59 @@ export class ListenerService {
     // Check if we've already processed this transaction
     if (await isTransactionProcessed(signature)) {
       logger.debug({ signature }, 'Transaction already processed');
+      return;
+    }
+
+    // Fetch transaction to check block time - only process NEW transactions
+    try {
+      const tx = await this.connection.getTransaction(signature, {
+        commitment: 'confirmed',
+        maxSupportedTransactionVersion: 0,
+      });
+
+      if (!tx) {
+        logger.debug({ signature }, 'Transaction not found, skipping');
+        return;
+      }
+
+      // Get transaction block time (in seconds since Unix epoch)
+      const txBlockTime = tx.blockTime;
+      if (!txBlockTime) {
+        logger.debug({ signature }, 'Transaction has no block time, skipping');
+        return;
+      }
+
+      // Only process transactions that happened AFTER service started
+      // This prevents processing old/historical transactions
+      if (txBlockTime < this.serviceStartTime) {
+        logger.debug(
+          { 
+            signature, 
+            txBlockTime: new Date(txBlockTime * 1000).toISOString(),
+            serviceStartTime: new Date(this.serviceStartTime * 1000).toISOString(),
+            ageSeconds: this.serviceStartTime - txBlockTime
+          }, 
+          'Transaction is older than service start time, skipping'
+        );
+        return;
+      }
+
+      // Also skip transactions older than 5 minutes as a safety measure
+      const currentTime = Date.now() / 1000;
+      const MAX_TRANSACTION_AGE_SECONDS = 5 * 60; // 5 minutes
+      if (currentTime - txBlockTime > MAX_TRANSACTION_AGE_SECONDS) {
+        logger.debug(
+          { 
+            signature, 
+            txBlockTime: new Date(txBlockTime * 1000).toISOString(),
+            ageSeconds: currentTime - txBlockTime
+          }, 
+          'Transaction is too old (>5 minutes), skipping'
+        );
+        return;
+      }
+    } catch (error) {
+      logger.warn({ error, signature }, 'Failed to fetch transaction for time check, skipping');
       return;
     }
 

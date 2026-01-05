@@ -125,6 +125,7 @@ export class TransactionParser {
   /**
    * Classify if a transaction is a swap based on token deltas
    * A swap should have exactly 1 token decrease and 1 token increase
+   * BUT may have multiple SOL decreases (one for swap, one for fees)
    */
   classifyAsSwap(deltas: TokenDelta[]): {
     isSwap: boolean;
@@ -143,9 +144,31 @@ export class TransactionParser {
       };
     }
 
-    // Could have multiple deltas due to fees, intermediary tokens, etc.
-    // For now, we only handle the simple case
-    // TODO: Handle complex routes
+    // Handle case with fees: Multiple decreases but they're all the same token (e.g., SOL for swap + SOL for fees)
+    if (decreases.length > 1 && increases.length === 1) {
+      // Check if all decreases are the same mint
+      const uniqueMints = new Set(decreases.map(d => d.mint));
+      
+      if (uniqueMints.size === 1) {
+        // All decreases are same token (e.g., multiple SOL decreases)
+        // Sum them up for the total input
+        const totalDecrease = decreases.reduce((sum, d) => sum + Math.abs(d.amount), 0);
+        
+        return {
+          isSwap: true,
+          tokenIn: {
+            ...decreases[0],
+            amount: totalDecrease,
+            uiAmount: totalDecrease
+          },
+          tokenOut: increases[0],
+        };
+      }
+    }
+
+    // Could have multiple deltas due to complex routes, intermediary tokens, etc.
+    // For now, we only handle the simple cases above
+    // TODO: Handle complex multi-hop routes
 
     return { isSwap: false };
   }
@@ -175,19 +198,24 @@ export class TransactionParser {
     walletAddress: string
   ): Promise<DetectedSwap | null> {
     const tx = await this.fetchTransaction(signature);
-    if (!tx) return null;
+    if (!tx) {
+      logger.warn({ signature }, 'Transaction fetch returned null');
+      return null;
+    }
 
     // Compute token deltas
     const deltas = this.computeTokenDeltas(tx, walletAddress);
+    logger.info({ signature, deltaCount: deltas.length, deltas }, 'Token deltas computed');
+    
     if (deltas.length === 0) {
-      logger.debug({ signature }, 'No token deltas found');
+      logger.warn({ signature }, 'No token deltas found - not a token transaction');
       return null;
     }
 
     // Classify as swap
     const { isSwap, tokenIn, tokenOut } = this.classifyAsSwap(deltas);
     if (!isSwap || !tokenIn || !tokenOut) {
-      logger.debug({ signature, deltas }, 'Not a simple swap');
+      logger.warn({ signature, deltas, decreases: deltas.filter(d => d.amount < 0).length, increases: deltas.filter(d => d.amount > 0).length }, 'Not a simple swap - complex route or not a swap');
       return null;
     }
 
