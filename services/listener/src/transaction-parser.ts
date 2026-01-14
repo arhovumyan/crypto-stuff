@@ -135,6 +135,8 @@ export class TransactionParser {
     const decreases = deltas.filter((d) => d.amount < 0);
     const increases = deltas.filter((d) => d.amount > 0);
 
+    const SOL_MINT = 'So11111111111111111111111111111111111111112';
+
     // Simple case: exactly 1 decrease and 1 increase = swap
     if (decreases.length === 1 && increases.length === 1) {
       return {
@@ -144,7 +146,7 @@ export class TransactionParser {
       };
     }
 
-    // Handle case with fees: Multiple decreases but they're all the same token (e.g., SOL for swap + SOL for fees)
+    // BUY with fees: Multiple decreases but they're all the same token (e.g., SOL for swap + SOL for fees)
     if (decreases.length > 1 && increases.length === 1) {
       // Check if all decreases are the same mint
       const uniqueMints = new Set(decreases.map(d => d.mint));
@@ -164,11 +166,28 @@ export class TransactionParser {
           tokenOut: increases[0],
         };
       }
+
+      // SELL with fees: Token decrease + SOL fee decrease, SOL proceeds increase
+      // Pattern: [-Token, -SOL(fee)] and [+SOL(proceeds)]
+      if (uniqueMints.size === 2 && uniqueMints.has(SOL_MINT) && increases.length === 1 && increases[0].mint === SOL_MINT) {
+        // One decrease should be non-SOL (the token being sold)
+        const tokenDecrease = decreases.find(d => d.mint !== SOL_MINT);
+        const solDecreases = decreases.filter(d => d.mint === SOL_MINT);
+        
+        if (tokenDecrease && solDecreases.length > 0) {
+          // This is a SELL: Token → SOL
+          // The SOL increase is the proceeds, don't subtract the fee from it
+          return {
+            isSwap: true,
+            tokenIn: { ...tokenDecrease, amount: Math.abs(tokenDecrease.amount) },
+            tokenOut: increases[0], // SOL proceeds
+          };
+        }
+      }
     }
 
     // Could have multiple deltas due to complex routes, intermediary tokens, etc.
-    // For now, we only handle the simple cases above
-    // TODO: Handle complex multi-hop routes
+    // For now, we only handle the cases above
 
     return { isSwap: false };
   }

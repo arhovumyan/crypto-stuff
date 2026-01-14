@@ -4,6 +4,7 @@
  */
 
 import { Connection, LAMPORTS_PER_SOL, Keypair, PublicKey, VersionedTransaction } from '@solana/web3.js';
+import { getAccount, getAssociatedTokenAddress } from '@solana/spl-token';
 import pg from 'pg';
 import pino from 'pino';
 import dotenv from 'dotenv';
@@ -55,6 +56,12 @@ const POLLING_INTERVAL = 500; // 500ms for ultra-fast response (2x per second)
 const JUPITER_API_URL = process.env.JUPITER_API_URL || 'https://api.jup.ag';
 const DEXSCREENER_API_URL = 'https://api.dexscreener.com';
 
+// Retry configuration for Jupiter order failures
+const MAX_SELL_RETRIES = 10; // Maximum number of retry attempts for sell orders
+const INITIAL_RETRY_DELAY_MS = 1000; // Start with 1 second delay
+const MAX_RETRY_DELAY_MS = 30000; // Cap delay at 30 seconds
+const RETRY_BACKOFF_MULTIPLIER = 1.5; // Exponential backoff multiplier
+
 export interface LeaderTrade {
   id: number;
   wallet: string;
@@ -89,9 +96,25 @@ export class CopyExecutor {
 
     // Load config
     this.copyPercentage = parseFloat(process.env.COPY_PERCENTAGE || '10');
-    this.fixedBuyAmountSOL = process.env.FIXED_BUY_AMOUNT_SOL 
-      ? parseFloat(process.env.FIXED_BUY_AMOUNT_SOL) 
-      : null;
+    
+    // Parse FIXED_BUY_AMOUNT_SOL - handle potential comment issues
+    const fixedBuyAmountStr = process.env.FIXED_BUY_AMOUNT_SOL?.trim();
+    if (fixedBuyAmountStr) {
+      // Remove any inline comments (everything after #)
+      const cleanValue = fixedBuyAmountStr.split('#')[0].trim();
+      this.fixedBuyAmountSOL = parseFloat(cleanValue);
+      
+      // Validate the parsed value
+      if (isNaN(this.fixedBuyAmountSOL) || this.fixedBuyAmountSOL <= 0) {
+        log.warn(`⚠️  Invalid FIXED_BUY_AMOUNT_SOL value: "${fixedBuyAmountStr}" - falling back to percentage mode`);
+        this.fixedBuyAmountSOL = null;
+      } else {
+        log.info(`✅ Fixed buy amount configured: ${this.fixedBuyAmountSOL} SOL`);
+      }
+    } else {
+      this.fixedBuyAmountSOL = null;
+    }
+    
     this.maxPositionSizeSOL = parseFloat(process.env.MAX_POSITION_SIZE_SOL || '999999');
     this.enableLiveTrading = process.env.ENABLE_LIVE_TRADING === 'true';
     
@@ -104,6 +127,13 @@ export class CopyExecutor {
     const mode = this.fixedBuyAmountSOL ? `Fixed ${this.fixedBuyAmountSOL} SOL` : `${this.copyPercentage}%`;
     const tradingMode = this.enableLiveTrading ? '🔴 LIVE' : '📝 PAPER';
     log.info(`⚙️  Executor initialized | Mode: ${mode} | Trading: ${tradingMode} | Blacklist: ${this.blacklistedTokens.size} tokens`);
+    
+    // Log the actual value being used for debugging
+    if (this.fixedBuyAmountSOL) {
+      log.info(`💰 Buy amount: ${this.fixedBuyAmountSOL} SOL per trade`);
+    } else {
+      log.info(`💰 Buy amount: ${this.copyPercentage}% of leader trade`);
+    }
   }
 
   /**
@@ -197,6 +227,136 @@ export class CopyExecutor {
       });
       return null;
     }
+  }
+
+  /**
+   * Get actual on-chain token balance
+   */
+  private async getOnChainTokenBalance(tokenMint: string): Promise<number> {
+    if (!this.keypair) {
+      return 0;
+    }
+
+    try {
+      const tokenMintPubkey = new PublicKey(tokenMint);
+      const associatedTokenAddress = await getAssociatedTokenAddress(
+        tokenMintPubkey,
+        this.keypair.publicKey
+      );
+
+      log.info(`🔍 Checking token account | Address: ${associatedTokenAddress.toBase58()}`);
+      
+      const tokenAccount = await getAccount(this.connection, associatedTokenAddress);
+      const balance = Number(tokenAccount.amount) / LAMPORTS_PER_SOL;
+      
+      log.info(`✅ On-chain balance verified | ${balance.toFixed(6)} tokens | Account exists`);
+      return balance;
+    } catch (error: any) {
+      // Token account doesn't exist or other error
+      if (error.message?.includes('could not find account') || error.name === 'TokenAccountNotFoundError') {
+        log.warn(`⚠️  Token account does not exist on-chain | This token was likely never purchased or already fully sold`);
+      } else {
+        log.error(`❌ Failed to get on-chain balance | ${error.message}`);
+      }
+      return 0;
+    }
+  }
+
+  /**
+   * Helper function to sleep for a specified duration
+   */
+  private async sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Retry wrapper for getJupiterOrder with exponential backoff and amount reduction
+   */
+  private async getJupiterOrderWithRetry(
+    inputMint: string,
+    outputMint: string,
+    amount: number,
+    taker: string,
+    maxRetries: number = MAX_SELL_RETRIES,
+    enableAmountReduction: boolean = false
+  ): Promise<{ order: any; actualAmount: number } | null> {
+    let lastError: any = null;
+    let delay = INITIAL_RETRY_DELAY_MS;
+    let baseAmount = amount; // Keep track of the base amount
+    let currentAmount = amount;
+    const reductionPercentages = [100, 99, 98, 95, 90, 85, 80, 75, 70, 60, 50, 40, 30, 20, 10]; // Try 100% first, then reduce minimally
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      // For sells, ALWAYS recheck on-chain balance before each attempt to get the true current balance
+      if (enableAmountReduction && this.keypair) {
+        log.info(`🔍 Rechecking actual on-chain balance before attempt ${attempt}...`);
+        const recheckBalance = await this.getOnChainTokenBalance(inputMint);
+        
+        if (recheckBalance === 0) {
+          // Token account doesn't exist or balance is 0 - stop retrying
+          log.warn(`⚠️  Token account has 0 balance or doesn't exist - stopping retry attempts`);
+          log.info(`   This token was likely already fully sold. No need to retry.`);
+          break;
+        }
+        
+        if (recheckBalance > 0) {
+          const recheckLamports = Math.floor(recheckBalance * LAMPORTS_PER_SOL);
+          log.info(`📊 Current on-chain balance: ${recheckBalance.toFixed(6)} tokens (${recheckLamports.toLocaleString()} lamports)`);
+          
+          // Update base amount to the actual current balance
+          if (Math.abs(recheckLamports - baseAmount) > 1000) {
+            log.warn(`⚠️  Balance changed! Updating from ${(baseAmount / LAMPORTS_PER_SOL).toFixed(6)} to ${recheckBalance.toFixed(6)}`);
+            baseAmount = recheckLamports;
+          } else {
+            baseAmount = recheckLamports; // Always use most recent
+          }
+        }
+      }
+
+      // Apply amount reduction based on attempt number
+      if (enableAmountReduction && attempt > 1) {
+        const reductionIndex = Math.min(attempt - 1, reductionPercentages.length - 1);
+        const reductionPercent = reductionPercentages[reductionIndex];
+        currentAmount = Math.floor(baseAmount * (reductionPercent / 100));
+        
+        if (reductionPercent < 100) {
+          log.info(`📉 Trying with ${reductionPercent}% of balance | ${(currentAmount / LAMPORTS_PER_SOL).toFixed(6)} tokens`);
+        }
+      } else {
+        // First attempt - always try 100% of balance
+        currentAmount = baseAmount;
+        if (attempt === 1) {
+          log.info(`🎯 Attempting 100% of balance: ${(currentAmount / LAMPORTS_PER_SOL).toFixed(6)} tokens`);
+        }
+      }
+      
+      const order = await this.getJupiterOrder(inputMint, outputMint, currentAmount, taker);
+      
+      // If order succeeded, return it with the actual amount used
+      if (order && order.transaction) {
+        if (attempt > 1 || currentAmount !== amount) {
+          log.info(`✅ Jupiter order succeeded | Attempt: ${attempt}/${maxRetries} | Selling: ${(currentAmount / LAMPORTS_PER_SOL).toFixed(6)} tokens`);
+        }
+        return { order, actualAmount: currentAmount };
+      }
+      
+      // If this was the last attempt, break
+      if (attempt === maxRetries) {
+        log.error(`❌ Jupiter order failed after ${maxRetries} attempts`);
+        break;
+      }
+      
+      // Log retry attempt
+      log.warn(`🔄 Retrying Jupiter order (attempt ${attempt}/${maxRetries}) in ${(delay / 1000).toFixed(1)}s...`);
+      
+      // Wait before retrying
+      await this.sleep(delay);
+      
+      // Increase delay with exponential backoff (capped at max)
+      delay = Math.min(delay * RETRY_BACKOFF_MULTIPLIER, MAX_RETRY_DELAY_MS);
+    }
+    
+    return null;
   }
 
   /**
@@ -644,43 +804,114 @@ export class CopyExecutor {
           trade.tokenIn
         );
 
-        if (tokenBalance === 0) {
-          log.info(`⏭️  Skipping sell - no position | ${this.getTokenSymbol(trade.tokenIn, trade.tokenInSymbol)}`);
+        log.info(`📊 Database balance check | Token: ${this.getTokenSymbol(trade.tokenIn, trade.tokenInSymbol)} | Balance: ${tokenBalance.toFixed(6)}`);
+
+        // Verify actual on-chain balance
+        log.info(`🔍 Verifying on-chain token balance for ${trade.tokenIn}...`);
+        const onChainBalance = await this.getOnChainTokenBalance(trade.tokenIn);
+        
+        // Determine what amount to try selling - ALWAYS use the maximum available
+        // When leader sells, we sell ALL of our positions regardless of balance check results
+        let amountToSell = 0;
+        
+        // Use the maximum of DB balance and on-chain balance to ensure we sell everything
+        amountToSell = Math.max(tokenBalance, onChainBalance);
+        
+        if (amountToSell > 0) {
+          const tokenDisplay = this.getTokenSymbol(trade.tokenIn, trade.tokenInSymbol);
+          log.info(`✅ Selling ALL positions: ${amountToSell.toFixed(6)} ${tokenDisplay}`);
+          if (onChainBalance === 0 && tokenBalance > 0) {
+            log.warn(`⚠️  On-chain check returned 0, but DB shows ${tokenBalance.toFixed(6)}`);
+            log.warn(`   🚀 Selling based on DB balance - leader sold, so we're selling everything!`);
+          }
+        } else {
+          // Both checks show 0 - token account doesn't exist and DB has no record
+          // This means we never bought this token or already sold it completely
+          const tokenDisplay = this.getTokenSymbol(trade.tokenIn, trade.tokenInSymbol);
+          log.warn(`⚠️  Cannot sell ${tokenDisplay} - no balance detected`);
+          log.info(`   Token account does not exist on-chain and DB shows 0 balance`);
+          log.info(`   This token was likely never purchased or already fully sold. Skipping.`);
+          
+          // Record as skipped (not failed) since we never owned it
+          await this.recorder.recordCopyAttempt({
+            leaderTradeId: trade.id,
+            leaderWallet: trade.wallet,
+            leaderSignature: trade.signature,
+            tokenIn: trade.tokenIn,
+            tokenInSymbol: trade.tokenInSymbol,
+            amountIn: trade.amountIn,
+            tokenOut: trade.tokenOut,
+            tokenOutSymbol: trade.tokenOutSymbol,
+            amountOut: trade.amountOut,
+            copyPercentage: this.copyPercentage,
+            calculatedAmountIn: '0',
+            status: 'skipped',
+            failureReason: 'Token account does not exist - never purchased or already sold',
+            ourSignature: undefined,
+            jupiterQuote: undefined,
+          });
           return;
         }
 
-        // Sell 100% of our position when leader sells
-        const amountToSell = tokenBalance;
-
         const tokenDisplay = this.getTokenSymbol(trade.tokenIn, trade.tokenInSymbol);
-        log.info(`🔍 Processing SELL | Balance: ${tokenBalance.toFixed(6)} ${tokenDisplay} (100%)`);
+        log.info(`🔍 Processing SELL | Selling ALL: ${amountToSell.toFixed(6)} ${tokenDisplay} (100% of all positions)`);
 
-        // Convert to smallest unit for Jupiter (assuming 6 decimals for most tokens)
+        // Convert to smallest unit for Jupiter
         const amountLamports = Math.floor(amountToSell * LAMPORTS_PER_SOL);
 
         if (amountLamports < 1) {
-          log.info(`⏭️  Sell amount too small | ${amountToSell.toFixed(6)} ${tokenDisplay}`);
+          log.warn(`⚠️  Amount too small to sell (${amountToSell.toFixed(9)} tokens)`);
+          log.info(`   Skipping sell - amount is below minimum threshold`);
           return;
         }
 
-        // Get order and execute
-        const order = await this.getJupiterOrder(
+        // Get order and execute with retry logic and amount reduction
+        log.info(`🔄 Attempting to get Jupiter order for sell (max ${MAX_SELL_RETRIES} attempts with amount reduction)...`);
+        const result = await this.getJupiterOrderWithRetry(
           trade.tokenIn,
           trade.tokenOut,
           amountLamports,
-          this.keypair.publicKey.toBase58()
+          this.keypair.publicKey.toBase58(),
+          MAX_SELL_RETRIES,
+          true // Enable amount reduction as fallback
         );
 
-        if (!order || !order.transaction) {
-          log.warn(`⚠️  Failed to get Jupiter order for sell | ${this.getTokenSymbol(trade.tokenIn, trade.tokenInSymbol)}`);
+        if (!result || !result.order || !result.order.transaction) {
+          log.error(`❌ Failed to get Jupiter order for sell after ${MAX_SELL_RETRIES} retries | ${this.getTokenSymbol(trade.tokenIn, trade.tokenInSymbol)}`);
+          
+          // Record the failed attempt
+          await this.recorder.recordCopyAttempt({
+            leaderTradeId: trade.id,
+            leaderWallet: trade.wallet,
+            leaderSignature: trade.signature,
+            tokenIn: trade.tokenIn,
+            tokenInSymbol: trade.tokenInSymbol,
+            amountIn: trade.amountIn,
+            tokenOut: trade.tokenOut,
+            tokenOutSymbol: trade.tokenOutSymbol,
+            amountOut: trade.amountOut,
+            copyPercentage: this.copyPercentage,
+            calculatedAmountIn: amountToSell.toString(),
+            status: 'failed',
+            failureReason: `Failed to get Jupiter order after ${MAX_SELL_RETRIES} retries (Insufficient funds error - possible liquidity issue)`,
+            ourSignature: undefined,
+            jupiterQuote: undefined,
+          });
           return;
+        }
+
+        const { order, actualAmount } = result;
+        const actualAmountSold = actualAmount / LAMPORTS_PER_SOL;
+        
+        if (actualAmount !== amountLamports) {
+          log.info(`ℹ️  Selling reduced amount | Original: ${amountToSell.toFixed(6)} | Actual: ${actualAmountSold.toFixed(6)}`);
         }
 
         const signature = await this.executeSwap(
           order,
           trade.tokenIn,
           trade.tokenOut,
-          amountLamports,
+          actualAmount,
           !this.enableLiveTrading
         );
 
@@ -697,7 +928,10 @@ export class CopyExecutor {
           log.info(`Trade ID:   #${trade.id}`);
           log.info(`Wallet:     ${trade.wallet}`);
           log.info(`Token:      ${tokenDisplay} → SOL`);
-          log.info(`Amount:     ${amountToSell.toFixed(6)} ${tokenDisplay} → ${solReceived.toFixed(6)} SOL`);
+          log.info(`Amount:     ${actualAmountSold.toFixed(6)} ${tokenDisplay} → ${solReceived.toFixed(6)} SOL`);
+          if (actualAmount !== amountLamports) {
+            log.info(`Note:       Sold ${((actualAmount / amountLamports) * 100).toFixed(1)}% of balance due to liquidity constraints`);
+          }
           log.info(`Signature:  ${signature}`);
           log.info('═══════════════════════════════════════════════════');
           log.info('────────────────────────────────────────────────────────────────────────────────');
@@ -714,21 +948,33 @@ export class CopyExecutor {
             tokenOutSymbol: trade.tokenOutSymbol,
             amountOut: trade.amountOut,
             copyPercentage: this.copyPercentage,
-            calculatedAmountIn: amountToSell.toString(),
+            calculatedAmountIn: actualAmountSold.toString(),
             status: 'success',
             ourSignature: signature,
             jupiterQuote: order,
           });
 
-          // Update position tracking for sell
-          if (this.enableLiveTrading && this.keypair) {
-            await this.recorder.reducePosition(
-              this.keypair.publicKey.toBase58(),
-              trade.tokenIn,
-              trade.tokenInSymbol,
-              amountToSell,
-              solReceived
-            );
+          // Update position tracking for sell (BOTH paper and live)
+          await this.recorder.reducePosition(
+            this.keypair.publicKey.toBase58(),
+            trade.tokenIn,
+            trade.tokenInSymbol,
+            actualAmountSold,
+            solReceived
+          );
+
+          // Verify we sold everything - check for remaining dust
+          log.info(`🔍 Verifying all tokens were sold...`);
+          await this.sleep(2000); // Wait 2 seconds for blockchain to update
+          const remainingBalance = await this.getOnChainTokenBalance(trade.tokenIn);
+          
+          if (remainingBalance > 0.000001) {
+            log.warn(`⚠️  DUST REMAINING: ${remainingBalance.toFixed(6)} ${tokenDisplay} still in wallet!`);
+            log.warn(`   Consider running another sell to clean this up.`);
+          } else if (remainingBalance > 0) {
+            log.info(`✅ Tiny dust remaining (${remainingBalance.toFixed(9)} ${tokenDisplay}) - acceptable`);
+          } else {
+            log.info(`✅ All tokens sold - wallet is clean!`);
           }
         }
 
@@ -736,10 +982,14 @@ export class CopyExecutor {
       }
 
       // Process BUY trade (SOL → Token)
+      // Always buy when leader buys - no skipping even if we already own the token
       const leaderAmountIn = parseFloat(trade.amountIn);
       const copyAmountIn = this.fixedBuyAmountSOL !== null 
         ? this.fixedBuyAmountSOL 
         : leaderAmountIn * (this.copyPercentage / 100);
+      
+      // Debug logging to verify the value being used
+      log.info(`💰 Buy calculation | fixedBuyAmountSOL: ${this.fixedBuyAmountSOL}, copyAmountIn: ${copyAmountIn}, leaderAmountIn: ${leaderAmountIn}`);
 
       // Check if amount is too small
       if (copyAmountIn < 0.0001) {
@@ -831,6 +1081,9 @@ export class CopyExecutor {
       // Convert to lamports for Jupiter
       const amountLamports = Math.floor(copyAmountIn * LAMPORTS_PER_SOL);
 
+      // Explicit logging to debug buy amount
+      log.info(`🔍 BUY AMOUNT DEBUG | fixedBuyAmountSOL: ${this.fixedBuyAmountSOL}, copyAmountIn: ${copyAmountIn}, amountLamports: ${amountLamports}`);
+      
       logger.info({
         context: 'Processing BUY',
         leaderAmount: leaderAmountIn,
@@ -918,18 +1171,17 @@ export class CopyExecutor {
           jupiterQuote: order,
         });
 
-        // Update position tracking
-        if (this.enableLiveTrading && this.keypair) {
-          const outputAmount = parseFloat(order.outAmount) / LAMPORTS_PER_SOL;
-          await this.recorder.updatePosition(
-            this.keypair.publicKey.toBase58(),
-            trade.tokenOut,
-            trade.tokenOutSymbol,
-            outputAmount,
-            copyAmountIn,
-            trade.id
-          );
-        }
+        // Update position tracking for BOTH paper and live trading
+        // (so we know what we own even in paper mode)
+        const outputAmount = parseFloat(order.outAmount) / LAMPORTS_PER_SOL;
+        await this.recorder.updatePosition(
+          this.keypair.publicKey.toBase58(),
+          trade.tokenOut,
+          trade.tokenOutSymbol,
+          outputAmount,
+          copyAmountIn,
+          trade.id
+        );
       } else {
         logger.error({
           context: 'Failed to execute swap',

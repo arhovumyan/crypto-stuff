@@ -37,9 +37,18 @@ export class ListenerService {
     logger.info('Starting Solana Copy Trader - Listener Service');
 
     try {
-      // Connect to Redis
+      // Connect to Redis (with retry logic)
       logger.info('Connecting to Redis...');
-      await connectRedis();
+      try {
+        await connectRedis(10, 1000); // Try 10 times with 1 second delay
+      } catch (error: any) {
+        logger.error('❌ Failed to connect to Redis. Cannot start service without Redis.');
+        logger.error('');
+        logger.error('🔧 Please start Redis first, then restart this service:');
+        logger.error('   docker-compose up -d redis');
+        logger.error('');
+        throw new Error('Redis connection required. Service cannot start without Redis.');
+      }
 
       // Connect to WebSocket
       logger.info('Connecting to Helius WebSocket...');

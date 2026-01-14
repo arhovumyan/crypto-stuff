@@ -8,18 +8,20 @@ async function testParseMissedTransaction() {
   const connection = new Connection(config.HELIUS_RPC_URL, 'confirmed');
   const parser = new TransactionParser(connection);
   
-  // One of the missed transactions from the screenshot
-  const signature = '2MQ4wfE1mWQZHy6xQFMeu5taPG7YwzaCPKrR5D8KWwMUovnL4MofNzXLguxki5Rx4DxNJuz4ZZtqkUxrRmzFxFcJ';
+  // Test SELL transaction that was rejected
+  const sellSig = 'rVreecUdPnn9y7woQgJ6iL8QWCHx1uoEg2eFnaC4QXAgEjTVXtRFZusMDsoMG77ZkADFQZYjj8WrR7FwJAHnrQ3';
   const wallet = 'ERBVcqUW8CyLF26CpZsMzi1Fq3pB8d8q5LswRiWk7jwT';
   
-  logger.info(`Testing parse of missed transaction: ${signature}`);
+  logger.info(`Testing SELL transaction: ${sellSig}`);
   
-  const swap = await parser.parseSwap(signature, wallet);
+  const swap = await parser.parseSwap(sellSig, wallet);
   
   if (swap) {
-    logger.info('✅ Successfully parsed as swap!', swap);
+    logger.info('✅ Successfully parsed SELL!');
+    logger.info(`   Token IN: ${swap.tokenIn.mint.slice(0, 6)}... Amount: ${swap.tokenIn.amount}`);
+    logger.info(`   Token OUT: ${swap.tokenOut.mint === 'So11111111111111111111111111111111111111112' ? 'SOL' : swap.tokenOut.mint.slice(0, 6)}... Amount: ${swap.tokenOut.amount}`);
   } else {
-    logger.error('❌ Failed to parse as swap');
+    logger.error('❌ Failed to parse SELL');
   }
 }
 
